@@ -262,6 +262,8 @@ def power_flow_calculation(Bus, Branch, SB=10, UB=10.38, pr=1e-6):
         return json.dumps(result, ensure_ascii=False, indent=2)
     
     except Exception as e:
+        import traceback
+        print(traceback.format_exc())
         return json.dumps({
             "status": "error",
             "message": str(e)

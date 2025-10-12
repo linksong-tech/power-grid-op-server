@@ -301,7 +301,7 @@ export default function FlowComputeEnhanced() {
         viewport={{ once: true }}
       >
         <CardHeader className="mb-4">
-          <CardTitle className="text-xl md:text-2xl flex items-center gap-2 text-white/70">
+          <CardTitle className="text-xl md:text-2xl flex items-center gap-2 text-muted-foreground">
             <WavesIcon />
             潮流计算
             {/* API状态指示器 */}
@@ -333,7 +333,7 @@ export default function FlowComputeEnhanced() {
                     <ItemMedia variant="icon">
                       <Settings className="h-4 w-4" />
                     </ItemMedia>
-                    <ItemTitle className="text-white/70">参数配置</ItemTitle>
+                    <ItemTitle className="text-muted-foreground">参数配置</ItemTitle>
                   </div>
 
                   <Item variant="outline" className="bg-white/5">
@@ -351,7 +351,7 @@ export default function FlowComputeEnhanced() {
                                 <Input
                                   {...field}
                                   placeholder="请输入基准电压"
-                                  className="mt-2 bg-black/40 border-white/20 text-white placeholder:text-white/50"
+                                  className="mt-2 bg-black/40 border-white/20 text-white placeholder:text-muted-foreground"
                                   disabled={loading}
                                 />
                               </FormControl>
@@ -371,7 +371,7 @@ export default function FlowComputeEnhanced() {
                                 <Input
                                   {...field}
                                   placeholder="请输入基准功率"
-                                  className="mt-2 bg-black/40 border-white/20 text-white placeholder:text-white/50"
+                                  className="mt-2 bg-black/40 border-white/20 text-white placeholder:text-muted-foreground"
                                   disabled={loading}
                                 />
                               </FormControl>
@@ -391,7 +391,7 @@ export default function FlowComputeEnhanced() {
                                 <Input
                                   {...field}
                                   placeholder="请输入收敛精度"
-                                  className="mt-2 bg-black/40 border-white/20 text-white placeholder:text-white/50"
+                                  className="mt-2 bg-black/40 border-white/20 text-white placeholder:text-muted-foreground"
                                   disabled={loading}
                                 />
                               </FormControl>
@@ -467,25 +467,25 @@ export default function FlowComputeEnhanced() {
                   <h4 className="text-green-400 font-semibold mb-2">最新计算结果</h4>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                     <div>
-                      <span className="text-white/70">迭代次数:</span>
+                      <span className="text-muted-foreground">迭代次数:</span>
                       <span className="ml-2 text-white">
                         {calculationResult.summary?.iteration_count || 'N/A'}
                       </span>
                     </div>
                     <div>
-                      <span className="text-white/70">是否收敛:</span>
+                      <span className="text-muted-foreground">是否收敛:</span>
                       <span className="ml-2 text-white">
                         {calculationResult.summary?.converged ? '是' : '否'}
                       </span>
                     </div>
                     <div>
-                      <span className="text-white/70">总损耗:</span>
+                      <span className="text-muted-foreground">总损耗:</span>
                       <span className="ml-2 text-white">
                         {calculationResult.summary?.total_active_loss_mw?.toFixed(4) || 'N/A'} MW
                       </span>
                     </div>
                     <div>
-                      <span className="text-white/70">网损率:</span>
+                      <span className="text-muted-foreground">网损率:</span>
                       <span className="ml-2 text-white">
                         {calculationResult.summary?.loss_rate_percent?.toFixed(2) || 'N/A'} %
                       </span>

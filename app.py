@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import json
 import numpy as np
-from powerflow_json import power_flow_calculation
+from lib.powerflow_json import power_flow_calculation
 from datetime import datetime
 import os
 
@@ -128,7 +128,17 @@ def calculate_power_flow():
         with open(result_file, 'w', encoding='utf-8') as f:
             json.dump(result_data, f, ensure_ascii=False, indent=2)
         
-        return jsonify(result_data)
+        if result_data['status'] == 'error':
+            return jsonify({
+                'status': 'error',
+                'message': '服务端错误，请联系管理员'
+            }), 500
+        
+        del result_data['status'];
+        return jsonify({
+            'status': 'success',
+            'data': result_data
+        })
         
     except Exception as e:
         return jsonify({
