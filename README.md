@@ -5,6 +5,7 @@
 ## 功能特性
 
 - ✅ **前推回代法潮流计算**：适用于辐射状配电网
+- ✅ **PSO无功优化**：基于粒子群算法的无功功率优化
 - ✅ **RESTful API接口**：支持参数配置、计算执行、结果查询
 - ✅ **跨域支持**：支持前端跨域请求
 - ✅ **数据持久化**：自动保存计算参数和结果
@@ -183,6 +184,105 @@ GET /api/flow-compute/results/{filename}
 GET /api/flow-compute/export/{filename}
 ```
 
+### PSO 无功优化接口
+
+#### 9. 保存 PSO 参数
+
+```http
+POST /api/pso-optimize/parameters
+Content-Type: application/json
+
+{
+  "num_particles": 30,
+  "max_iter": 50,
+  "w": 0.8,
+  "c1": 1.5,
+  "c2": 1.5,
+  "v_min": 0.95,
+  "v_max": 1.05,
+  "SB": 10,
+  "UB": 10.38,
+  "pr": 1e-6
+}
+```
+
+#### 10. 获取 PSO 参数
+
+```http
+GET /api/pso-optimize/parameters
+```
+
+#### 11. 执行 PSO 无功优化
+
+```http
+POST /api/pso-optimize/optimize
+Content-Type: application/json
+
+{
+  "busData": [
+    [1, 0, 0],
+    [2, 0, 0],
+    [33, -0.6704, 0.0386],
+    [34, -1.205, 0.414]
+  ],
+  "branchData": [
+    [1, 1, 2, 0.3436, 0.8136],
+    [33, 10, 34, 0.16625, 0.1204]
+  ],
+  "tunableNodes": [
+    [32, -0.3, 0.3, "节点33"],
+    [33, -0.5, 0.5, "节点34"]
+  ],
+  "psoParameters": {
+    "num_particles": 30,
+    "max_iter": 50,
+    "w": 0.8,
+    "c1": 1.5,
+    "c2": 1.5,
+    "v_min": 0.95,
+    "v_max": 1.05
+  }
+}
+```
+
+**响应示例：**
+```json
+{
+  "status": "success",
+  "data": {
+    "optimal_params": [0.15, -0.2],
+    "optimal_loss_rate": 2.45,
+    "initial_loss_rate": 3.12,
+    "loss_reduction": 0.67,
+    "loss_reduction_percent": 21.47,
+    "fitness_history": [3.12, 2.89, 2.67, 2.45],
+    "initial_q_values": [0.0386, 0.414],
+    "node_names": ["节点33", "节点34"],
+    "final_voltages": [10.3, 10.2, 10.1, 10.0],
+    "initial_voltages": [10.3, 10.1, 9.8, 9.9],
+    "convergence": true,
+    "power_info": {
+      "balance_node_output": 0.5,
+      "pv_total_injection": 1.875,
+      "total_input_power": 2.375,
+      "total_output_power": 2.32
+    }
+  }
+}
+```
+
+#### 12. 获取 PSO 模板
+
+```http
+GET /api/pso-optimize/template
+```
+
+#### 13. 获取 PSO 结果列表
+
+```http
+GET /api/pso-optimize/results
+```
+
 ## 数据格式说明
 
 ### 节点数据格式
@@ -205,6 +305,65 @@ GET /api/flow-compute/export/{filename}
 [
   [支路号, 首节点, 尾节点, 电阻(Ω), 电抗(Ω)]
 ]
+```
+
+### PSO 优化数据格式
+
+#### 可调节点配置
+
+```json
+[
+  [节点索引, 无功最小值(MVar), 无功最大值(MVar), 节点名称]
+]
+```
+
+**示例：**
+```json
+[
+  [32, -0.3, 0.3, "节点33"],
+  [33, -0.5, 0.5, "节点34"]
+]
+```
+
+#### PSO 算法参数
+
+```json
+{
+  "num_particles": 30,    // 粒子数量
+  "max_iter": 50,         // 最大迭代次数
+  "w": 0.8,               // 初始惯性权重
+  "c1": 1.5,              // 认知系数
+  "c2": 1.5,              // 社会系数
+  "v_min": 0.95,          // 电压下限(标幺值)
+  "v_max": 1.05,          // 电压上限(标幺值)
+  "SB": 10,               // 基准功率(MVA)
+  "UB": 10.38,            // 基准电压(kV)
+  "pr": 1e-6              // 潮流收敛精度
+}
+```
+
+#### PSO 优化结果格式
+
+```json
+{
+  "optimal_params": [0.15, -0.2],           // 最优无功参数
+  "optimal_loss_rate": 2.45,                 // 最优网损率(%)
+  "initial_loss_rate": 3.12,                 // 初始网损率(%)
+  "loss_reduction": 0.67,                    // 网损率降低值(%)
+  "loss_reduction_percent": 21.47,          // 网损率降低百分比(%)
+  "fitness_history": [3.12, 2.89, 2.67, 2.45], // 优化过程历史
+  "initial_q_values": [0.0386, 0.414],      // 初始无功值
+  "node_names": ["节点33", "节点34"],        // 节点名称
+  "final_voltages": [10.3, 10.2, 10.1, 10.0], // 最终电压分布
+  "initial_voltages": [10.3, 10.1, 9.8, 9.9], // 初始电压分布
+  "convergence": true,                       // 收敛状态
+  "power_info": {                           // 功率信息
+    "balance_node_output": 0.5,
+    "pv_total_injection": 1.875,
+    "total_input_power": 2.375,
+    "total_output_power": 2.32
+  }
+}
 ```
 
 ## 前端集成示例
@@ -253,6 +412,25 @@ const result = await api.calculatePowerFlow({
   busData: template.data.busData,
   branchData: template.data.branchData,
 });
+
+// PSO 无功优化示例
+const psoResult = await api.psoOptimize({
+  busData: template.data.busData,
+  branchData: template.data.branchData,
+  tunableNodes: [
+    [32, -0.3, 0.3, "节点33"],
+    [33, -0.5, 0.5, "节点34"]
+  ],
+  psoParameters: {
+    num_particles: 30,
+    max_iter: 50,
+    w: 0.8,
+    c1: 1.5,
+    c2: 1.5,
+    v_min: 0.95,
+    v_max: 1.05
+  }
+});
 ```
 
 ### JavaScript 集成
@@ -289,6 +467,61 @@ async function calculatePowerFlow(busData, branchData, parameters) {
     return null;
   }
 }
+
+// PSO 无功优化函数
+async function psoOptimize(busData, branchData, tunableNodes, psoParameters) {
+  try {
+    const response = await fetch('http://localhost:5000/api/pso-optimize/optimize', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        busData: busData,
+        branchData: branchData,
+        tunableNodes: tunableNodes,
+        psoParameters: psoParameters
+      }),
+    });
+    
+    const result = await response.json();
+    
+    if (result.status === 'success') {
+      console.log('PSO优化成功:', result.data);
+      console.log(`网损率降低: ${result.data.loss_reduction_percent}%`);
+      return result;
+    } else {
+      console.error('PSO优化失败:', result.message);
+      return null;
+    }
+  } catch (error) {
+    console.error('请求失败:', error);
+    return null;
+  }
+}
+
+// 使用示例
+const busData = [[1,0,0],[2,0.5,0.1],[3,-0.2,0]];
+const branchData = [[1,1,2,0.1,0.2],[2,2,3,0.05,0.1]];
+const tunableNodes = [[2, -0.1, 0.1, "节点2"]];
+
+// 执行潮流计算
+const flowResult = await calculatePowerFlow(busData, branchData, {
+  baseVoltage: 10.3,
+  basePower: 10.38,
+  convergencePrecision: 1e-6
+});
+
+// 执行PSO优化
+const psoResult = await psoOptimize(busData, branchData, tunableNodes, {
+  num_particles: 30,
+  max_iter: 50,
+  w: 0.8,
+  c1: 1.5,
+  c2: 1.5,
+  v_min: 0.95,
+  v_max: 1.05
+});
 ```
 
 ## 测试工具
@@ -320,6 +553,27 @@ curl -X POST http://localhost:5000/api/flow-compute/calculate \
     "convergencePrecision": 1e-6,
     "busData": [[1,0,0],[2,0.5,0.1],[3,-0.2,0]],
     "branchData": [[1,1,2,0.1,0.2],[2,2,3,0.05,0.1]]
+  }'
+
+# 获取PSO模板数据
+curl http://localhost:5000/api/pso-optimize/template
+
+# 执行PSO优化
+curl -X POST http://localhost:5000/api/pso-optimize/optimize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "busData": [[1,0,0],[2,0.5,0.1],[3,-0.2,0]],
+    "branchData": [[1,1,2,0.1,0.2],[2,2,3,0.05,0.1]],
+    "tunableNodes": [[2, -0.1, 0.1, "节点2"]],
+    "psoParameters": {
+      "num_particles": 30,
+      "max_iter": 50,
+      "w": 0.8,
+      "c1": 1.5,
+      "c2": 1.5,
+      "v_min": 0.95,
+      "v_max": 1.05
+    }
   }'
 ```
 
