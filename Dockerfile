@@ -9,6 +9,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
+ENV PYTHONPATH=/app:/app/lib
+ENV PYTHONPATH=/app
 
 # 安装系统依赖
 RUN apt-get update && apt-get install -y \
@@ -25,6 +27,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 复制应用代码
 COPY . .
 
+# 构建期自检：确保 lib 包可导入
+RUN python -c "import sys, os; print('PYTHONPATH=', os.environ.get('PYTHONPATH')); import lib.powerflow_json as m; print('lib.powerflow_json OK:', getattr(m, '__file__', 'no file'))"
+
 # 创建必要的目录
 RUN mkdir -p data results uploads
 
@@ -39,4 +44,4 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD python -c "import requests; requests.get('http://localhost:5002/api/health')" || exit 1
 
 # 启动应用
-CMD ["python", "app.py"]
+CMD ["python", "app.py", "--port", "5002"]
