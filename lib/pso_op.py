@@ -188,8 +188,8 @@ def pso_op(Bus, Branch, tunable_q_nodes, num_particles=30, max_iter=50,
     q_maxs = np.array([node[2] for node in tunable_q_nodes])  # 各节点最大值
     
     # 电压约束（转换为有名值）
-    v_min_kv = v_min * UB
-    v_max_kv = v_max * UB
+    v_min_kv = v_min * 10
+    v_max_kv = v_max * 10
     
     # 初始化粒子群
     particles = np.random.rand(num_particles, dim)

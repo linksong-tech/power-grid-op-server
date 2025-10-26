@@ -104,8 +104,8 @@ def calculate_power_flow():
             }), 400
         
         # 获取计算参数
-        base_voltage = float(data.get('baseVoltage', 10.3))
-        base_power = float(data.get('basePower', 10.38))
+        base_voltage = float(data.get('baseVoltage', 10.38))
+        base_power = float(data.get('basePower', 10))
         precision = float(data.get('convergencePrecision', 1e-6))
         
         # 转换数据格式
