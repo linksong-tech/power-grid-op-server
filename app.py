@@ -4,6 +4,8 @@ import json
 import numpy as np
 from lib.powerflow_json import power_flow_calculation
 from lib.pso_op import pso_op
+from lib.oc_source import get_oc_source_flat_data
+from lib.oc_source_remote import get_remote_oc_source_data
 from datetime import datetime
 import os
 
@@ -601,6 +603,71 @@ def get_pso_results():
             'message': f'获取PSO结果列表失败: {str(e)}'
         }), 500
 
+@app.route('/api/flow-compute/oc-source', methods=['GET'])
+def get_remote_oc_source():
+    """获取实时运行工况数据源（从宿主机接口）"""
+    try:
+        flat_data, error_message = get_remote_oc_source_data()
+        
+        if error_message:
+            # 根据错误类型返回不同的HTTP状态码
+            if '无法连接' in error_message or '超时' in error_message:
+                return jsonify({
+                    'status': 'error',
+                    'message': error_message
+                }), 503
+            elif '未找到' in error_message or '未能成功配对' in error_message:
+                return jsonify({
+                    'status': 'error',
+                    'message': error_message
+                }), 404
+            else:
+                return jsonify({
+                    'status': 'error',
+                    'message': error_message
+                }), 400
+        
+        return jsonify({
+            'status': 'success',
+            'data': flat_data
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'获取数据源失败: {str(e)}'
+        }), 500
+
+@app.route('/api/flow-compute/oc-source-local', methods=['GET'])
+def get_oc_source():
+    """获取实时运行工况数据源（从本地JSON文件）"""
+    try:
+        flat_data, error_message = get_oc_source_flat_data()
+        
+        if error_message:
+            # 根据错误类型返回不同的HTTP状态码
+            if '目录不存在' in error_message or '文件不存在' in error_message:
+                return jsonify({
+                    'status': 'error',
+                    'message': error_message
+                }), 404
+            else:
+                return jsonify({
+                    'status': 'error',
+                    'message': error_message
+                }), 400
+        
+        return jsonify({
+            'status': 'success',
+            'data': flat_data
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'获取数据源失败: {str(e)}'
+        }), 500
+
 @app.errorhandler(404)
 def not_found(error):
     return jsonify({
@@ -636,6 +703,8 @@ if __name__ == '__main__':
     print("  GET  /api/flow-compute/results - 获取结果列表")
     print("  GET  /api/flow-compute/results/<filename> - 获取结果详情")
     print("  GET  /api/flow-compute/export/<filename> - 导出结果")
+    print("  GET  /api/flow-compute/oc-source - 从宿主机接口获取运行工况数据")
+    print("  GET  /api/flow-compute/oc-source-local - 从本地JSON文件获取运行工况数据")
     print("  POST /api/pso-optimize/parameters - 保存PSO参数")
     print("  GET  /api/pso-optimize/parameters - 获取PSO参数")
     print("  POST /api/pso-optimize/optimize - 执行PSO优化")
