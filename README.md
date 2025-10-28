@@ -26,8 +26,14 @@
 ### 1. 安装依赖
 
 ```bash
+# 启用虚拟环境
+python -m venv venv
+source venv/bin/activate
+
 # 安装Python依赖
 pip install -r requirements.txt
+# 或
+pip install -r requirements-py313.txt # python3.13版本
 
 # 或者使用启动脚本自动安装
 python start_server.py --install-deps
