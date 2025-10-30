@@ -26,6 +26,11 @@ def power_flow_calculation(Bus, Branch, SB=10, UB=10.38, pr=1e-6):
         busnum = Bus.shape[0]
         branchnum = Branch.shape[0]
         
+        # 规范化支路编号，确保为 1..branchnum，避免由外部不连续/过大编号导致的越界
+        # 后续所有以支路号为索引的数组（如 Ploss、Qloss、P、Q、I）均与此顺序对齐
+        normalized_branch_ids = np.arange(1, branchnum + 1)
+        Branch[:, 0] = normalized_branch_ids
+        
         # 标幺化处理
         Bus_pu = np.copy(Bus)
         Bus_pu[:, 1] = Bus_pu[:, 1] / SB  # 负荷有功标幺值
