@@ -39,6 +39,11 @@ def pso_op(Bus, Branch, tunable_q_nodes, num_particles=30, max_iter=50,
         for i, (node_idx, _, _, _) in enumerate(tunable_q_nodes):
             Bus_copy[node_idx, 2] = tunable_q_values[i]  # 第2列是无功
         
+        # 规范化支路编号，确保为 1..branchnum，避免外部数据越界
+        branchnum = Branch_copy.shape[0]
+        normalized_branch_ids = np.arange(1, branchnum + 1)
+        Branch_copy[:, 0] = normalized_branch_ids
+
         # 标幺化处理
         Bus_copy[:, 1] = Bus_copy[:, 1] / SB  # 有功标幺值
         Bus_copy[:, 2] = Bus_copy[:, 2] / SB  # 无功标幺值
