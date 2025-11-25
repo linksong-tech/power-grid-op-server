@@ -12,11 +12,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 ENV PYTHONPATH=/app:/app/lib
 ENV PYTHONPATH=/app
 
-# 安装系统依赖
-RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
+# 替换 Debian 镜像源为阿里云完整源，并安装 gcc/g++
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources && \
+    apt-get update && apt-get install -y gcc g++ && rm -rf /var/lib/apt/lists/*
 
 # 复制requirements文件
 COPY requirements.txt .
