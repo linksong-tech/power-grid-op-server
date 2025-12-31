@@ -8,7 +8,7 @@ CORS(app)  # 启用CORS支持跨域请求
 
 # 配置
 app.config['JSON_AS_ASCII'] = False  # 支持中文字符
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 限制上传文件大小为16MB
+app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024 * 1024  # 限制上传文件大小为1GB
 
 # 创建数据存储目录
 DATA_DIR = 'data'
@@ -46,7 +46,8 @@ if __name__ == '__main__':
     
     print("启动电力潮流计算服务...")
     print(f"服务地址: http://localhost:{port}")
-    print("API文档:")
+    print("\n=== API文档 ===")
+    print("\n【潮流计算】")
     print("  GET  /api/health - 健康检查")
     print("  POST /api/flow-compute/parameters - 保存参数")
     print("  GET  /api/flow-compute/parameters - 获取参数")
@@ -57,12 +58,29 @@ if __name__ == '__main__':
     print("  GET  /api/flow-compute/export/<filename> - 导出结果")
     print("  GET  /api/flow-compute/oc-source - 从宿主机接口获取运行工况数据")
     print("  GET  /api/flow-compute/oc-source-local - 从本地JSON文件获取运行工况数据")
+    print("\n【PSO优化】")
     print("  POST /api/pso-optimize/parameters - 保存PSO参数")
     print("  GET  /api/pso-optimize/parameters - 获取PSO参数")
     print("  POST /api/pso-optimize/optimize - 执行PSO优化")
     print("  POST /api/pso-optimize/optimize/v2 - 执行PSO优化(v2)")
     print("  GET  /api/pso-optimize/template - 获取PSO模板")
     print("  GET  /api/pso-optimize/results - 获取PSO结果列表")
+    print("\n【TD3强化学习优化】")
+    print("  POST /api/td3-optimize/train - 开始训练TD3模型")
+    print("  GET  /api/td3-optimize/training-status - 获取训练状态")
+    print("  POST /api/td3-optimize/stop-training - 停止训练")
+    print("  POST /api/td3-optimize/upload-samples - 上传训练样本")
+    print("  GET  /api/td3-optimize/samples - 获取训练样本列表")
+    print("  GET  /api/td3-optimize/samples/<filename> - 获取样本详情")
+    print("  GET  /api/td3-optimize/agents - 获取历史智能体列表")
+    print("  GET  /api/td3-optimize/agents/<model_name> - 获取智能体详情")
+    print("  DELETE /api/td3-optimize/agents/<model_name> - 删除智能体")
+    print("  POST /api/td3-optimize/optimize - 执行TD3优化")
+    print("  POST /api/td3-optimize/batch - 批量执行TD3优化")
+    print("  GET  /api/td3-optimize/models - 获取可用模型列表")
+    print("  GET  /api/td3-optimize/results - 获取TD3结果列表")
+    print("  GET  /api/td3-optimize/results/<filename> - 获取TD3结果详情")
+    print("  GET  /api/td3-optimize/template - 获取TD3模板")
     print("\n注意: 如果5000端口被占用，请使用 --port 参数指定其他端口")
     print("例如: python app.py --port 5001")
     

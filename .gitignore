@@ -8,3 +8,4 @@ __pycache__
 data
 results
 /venv
+td3_training_data

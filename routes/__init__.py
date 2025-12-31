@@ -8,7 +8,9 @@ def register_routes(app):
     from .health import health_bp
     from .flow_compute import flow_compute_bp
     from .pso_optimize import pso_optimize_bp
+    from .td3_optimize import td3_optimize_bp
     
     app.register_blueprint(health_bp)
     app.register_blueprint(flow_compute_bp)
     app.register_blueprint(pso_optimize_bp)
+    app.register_blueprint(td3_optimize_bp)
