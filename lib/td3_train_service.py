@@ -11,6 +11,7 @@ from collections import deque
 import random
 import datetime
 import os
+import glob
 from typing import Dict, List, Tuple, Optional, Callable
 from td3_core import ActorNetwork, CriticNetwork, power_flow_calculation
 
@@ -126,6 +127,45 @@ class TD3TrainService:
         }, filepath)
 
 
+def save_best_model(agent: TD3TrainService, model_save_dir: str, filename: str, 
+                    best_loss_rate: float, current_loss_rate: float) -> float:
+    """
+    只保存最优模型，删除旧的非最优模型
+    参考 td3onesample.py 的实现
+    
+    Args:
+        agent: TD3训练服务实例
+        model_save_dir: 模型保存目录
+        filename: 模型基础名称（如 "M1"）
+        best_loss_rate: 当前最优网损率
+        current_loss_rate: 当前轮次网损率
+    
+    Returns:
+        更新后的最优网损率
+    """
+    if current_loss_rate < best_loss_rate and current_loss_rate < 15:
+        # 删除旧的最优模型
+        old_models = glob.glob(os.path.join(model_save_dir, f"{filename}_*.pth"))
+        for old_model in old_models:
+            try:
+                os.remove(old_model)
+            except Exception as e:
+                print(f"删除旧模型失败: {old_model}, 错误: {e}")
+        
+        # 生成新的模型文件名（格式：M1_MMDD_HHMMSS.pth）
+        current_time = datetime.datetime.now()
+        time_str = current_time.strftime("%m%d_%H%M%S")
+        save_filename = f"{filename}_{time_str}.pth"
+        save_path = os.path.join(model_save_dir, save_filename)
+        
+        # 保存新的最优模型
+        agent.save_model(save_path)
+        best_loss_rate = current_loss_rate
+        print(f"更新最优模型，网损率: {best_loss_rate:.4f}%")
+    
+    return best_loss_rate
+
+
 def train_td3_model(
     bus_data: np.ndarray,
     branch_data: np.ndarray,
@@ -137,6 +177,7 @@ def train_td3_model(
     max_episodes: int = 800,
     max_steps: int = 3,
     model_save_path: str = "td3_model.pth",
+    pr: float = 1e-6,
     progress_callback: Optional[Callable] = None
 ) -> Dict:
     """
@@ -153,6 +194,7 @@ def train_td3_model(
         max_episodes: 最大训练轮次
         max_steps: 每轮最大步数
         model_save_path: 模型保存路径
+        pr: 潮流收敛精度（默认 1e-6）
         progress_callback: 进度回调函数 callback(episode, reward, loss_rate)
     
     Returns:
@@ -176,11 +218,12 @@ def train_td3_model(
     # 训练环境
     env = PowerSystemEnv(
         bus_data, branch_data, voltage_limits, key_nodes, 
-        tunable_q_nodes, ub, sb
+        tunable_q_nodes, ub, sb, pr
     )
     
     # 预填充经验池
     prefill_steps = 0
+    print(f"预填充经验池...")
     while len(agent.replay_buffer) < 5000 and prefill_steps < 10000:
         state = env.reset()
         for step in range(max_steps):
@@ -191,11 +234,20 @@ def train_td3_model(
             if done:
                 break
             state = next_state
+    print(f"预填充完成，经验池大小: {len(agent.replay_buffer)}")
     
     # 训练循环
     rewards_history = []
     loss_rates_history = []
     best_loss_rate = float('inf')
+    
+    print(f"\n=== 开始训练TD3模型 ===")
+    print(f"状态维度: {state_dim}, 动作维度: {action_dim}")
+    print(f"训练轮次: {max_episodes}, 每轮步数: {max_steps}")
+    print(f"潮流收敛精度: {pr}")
+    print(f"模型保存目录: {os.path.dirname(model_save_path)}")
+    print(f"模型文件前缀: M1")
+    print("")
     
     for episode in range(max_episodes):
         state = env.reset()
@@ -222,21 +274,49 @@ def train_td3_model(
         rewards_history.append(episode_reward)
         loss_rates_history.append(episode_loss_rate)
         
-        # 保存最优模型
-        if episode_loss_rate < best_loss_rate and episode_loss_rate < 15:
-            best_loss_rate = episode_loss_rate
-            timestamp = datetime.datetime.now().strftime("%m%d_%H%M%S")
-            save_path = f"{model_save_path.rsplit('.', 1)[0]}_{timestamp}.pth"
-            agent.save_model(save_path)
+        # 保存最优模型（使用 save_best_model 函数，参考 td3onesample.py）
+        # 使用 "M1" 作为默认文件名前缀（与 td3onesample.py 保持一致）
+        model_save_dir = os.path.dirname(model_save_path) if os.path.dirname(model_save_path) else os.getcwd()
+        filename_prefix = "M1"  # 默认使用 M1 前缀
+        
+        best_loss_rate = save_best_model(
+            agent=agent,
+            model_save_dir=model_save_dir,
+            filename=filename_prefix,
+            best_loss_rate=best_loss_rate,
+            current_loss_rate=episode_loss_rate
+        )
+        
+        # 打印训练进度（每 50 个 episode）
+        if episode % 50 == 0:
+            print(f"Episode {episode:3d} | 奖励: {episode_reward:6.2f} | 网损率: {episode_loss_rate:.4f}% | 最优网损: {best_loss_rate:.4f}%")
         
         # 进度回调
         if progress_callback:
             progress_callback(episode, episode_reward, episode_loss_rate)
     
+    # 获取最终保存的模型路径
+    final_model_path = None
+    if best_loss_rate < 15:
+        model_save_dir = os.path.dirname(model_save_path) if os.path.dirname(model_save_path) else os.getcwd()
+        # 查找最新的 M1_*.pth 模型文件
+        model_files = glob.glob(os.path.join(model_save_dir, "M1_*.pth"))
+        if model_files:
+            # 按修改时间排序，获取最新的
+            model_files.sort(key=os.path.getmtime, reverse=True)
+            final_model_path = model_files[0]
+    
+    print(f"\n=== 训练完成 ===")
+    print(f"最终最优网损率: {best_loss_rate:.4f}%")
+    if final_model_path:
+        print(f"最优模型已保存: {final_model_path}")
+    else:
+        print(f"未达到保存条件（网损率 >= 15%），未保存模型")
+    
     return {
         'success': True,
         'best_loss_rate': best_loss_rate,
-        'model_path': save_path if best_loss_rate < 15 else None,
+        'model_path': final_model_path,
         'training_history': {
             'rewards': rewards_history,
             'loss_rates': loss_rates_history
@@ -247,7 +327,7 @@ def train_td3_model(
 class PowerSystemEnv:
     """电力系统环境（简化版）"""
     def __init__(self, bus_data, branch_data, voltage_limits, key_nodes, 
-                 tunable_q_nodes, ub, sb):
+                 tunable_q_nodes, ub, sb, pr=1e-6):
         self.Bus = bus_data
         self.Branch = branch_data
         self.v_min, self.v_max = voltage_limits
@@ -255,19 +335,22 @@ class PowerSystemEnv:
         self.tunable_q_nodes = tunable_q_nodes
         self.ub = ub
         self.sb = sb
+        self.pr = pr  # 潮流收敛精度
         self.q_mins = np.array([node[1] for node in tunable_q_nodes])
         self.q_maxs = np.array([node[2] for node in tunable_q_nodes])
         self.previous_loss_rate = None
+        self.previous_voltages = None  # 保存上一次的电压值
     
     def reset(self):
         initial_q = [self.Bus[node[0], 2] for node in self.tunable_q_nodes]
         _, initial_voltages, _ = power_flow_calculation(
-            self.Bus, self.Branch, self.tunable_q_nodes, initial_q, self.sb, self.ub
+            self.Bus, self.Branch, self.tunable_q_nodes, initial_q, self.sb, self.ub, self.pr
         )
         if initial_voltages is None:
             initial_voltages = np.ones(self.Bus.shape[0]) * self.ub
         self.state = self._build_state(initial_voltages)
         self.previous_loss_rate = None
+        self.previous_voltages = initial_voltages.copy() if initial_voltages is not None else None
         return self.state
     
     def _build_state(self, voltages):
@@ -278,16 +361,17 @@ class PowerSystemEnv:
     def step(self, action):
         actual_action = self._denormalize_action(action)
         loss_rate, voltages, _ = power_flow_calculation(
-            self.Bus, self.Branch, self.tunable_q_nodes, actual_action, self.sb, self.ub
+            self.Bus, self.Branch, self.tunable_q_nodes, actual_action, self.sb, self.ub, self.pr
         )
         
         if loss_rate is None:
             return self.state, -100, True, {"loss_rate": 100}
         
-        reward = self._calculate_reward(loss_rate, voltages)
+        reward = self._calculate_reward(loss_rate, voltages, action)
         next_state = self._build_state(voltages)
         self.state = next_state
         self.previous_loss_rate = loss_rate
+        self.previous_voltages = voltages.copy()
         
         return next_state, reward, False, {"loss_rate": loss_rate, "voltages": voltages}
     
@@ -299,7 +383,15 @@ class PowerSystemEnv:
             actual_actions.append(actual)
         return actual_actions
     
-    def _calculate_reward(self, loss_rate, voltages):
+    def _calculate_reward(self, loss_rate, voltages, action=None):
+        """
+        计算奖励函数
+        
+        Args:
+            loss_rate: 网损率
+            voltages: 节点电压数组
+            action: 动作（保留参数以保持接口一致性，当前未使用）
+        """
         base_reward = -loss_rate * 90
         voltage_penalty = sum(20 * max(self.v_min - v, 0, v - self.v_max) for v in voltages)
         voltage_reward = sum(2 for v in voltages if self.v_min <= v <= self.v_max)

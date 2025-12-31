@@ -13,29 +13,34 @@ import traceback
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), 'lib'))
 
 from td3_train_service import train_td3_model
-from routes.td3_config import MODELS_DIR, training_status
+from routes.td3_config import MODELS_DIR, TRAINING_DATA_DIR, training_status
 from routes.training_management import get_training_status_info, stop_training_task
+from routes.td3_data_reader import load_training_data
+
+# 模型文件名前缀
+MODEL_FILENAME_PREFIX = "M1"
 
 
 def start_training():
     """
     开始TD3模型训练
     
-    请求体格式:
+    请求体格式（新版本）:
     {
-        "busData": [[节点号, 有功P, 无功Q], ...],
-        "branchData": [[线路号, 首节点, 末节点, 电阻R, 电抗X], ...],
-        "voltageLimits": [v_min, v_max],
-        "keyNodes": [节点索引1, 节点索引2, ...],
-        "tunableNodes": [[节点索引, Q_min, Q_max, "节点名"], ...],
+        "line_name": "C5336",  // 线路名称（必填）
         "parameters": {
-            "UB": 10.38,
-            "SB": 10,
-            "max_episodes": 800,
-            "max_steps": 3,
-            "model_name": "my_model"
+            "max_episodes": 800,    // 最大训练轮次（可选，默认800）
+            "max_steps": 3,          // 每轮最大步数（可选，默认3）
+            "SB": 10,                 // 基准功率MVA（可选，默认10）
+            "pr": 1e-6                // 潮流收敛精度（可选，默认1e-6）
         }
     }
+    
+    说明：
+    - 所有训练数据（busData, branchData, voltageLimits, keyNodes, tunableNodes, UB）
+      将从已上传的训练数据目录中自动读取
+    - 线路目录路径: td3_training_data/training_data/{line_name}/
+    - 模型保存格式: {MODEL_FILENAME_PREFIX}_MMDD_HHMMSS.pth
     """
     global training_status
     
@@ -50,39 +55,52 @@ def start_training():
         data = request.get_json()
         
         # 验证必需参数
-        required_fields = ['busData', 'branchData', 'voltageLimits', 'keyNodes', 'tunableNodes']
-        for field in required_fields:
-            if field not in data:
-                return jsonify({
-                    'status': 'error',
-                    'message': f'缺少必需参数: {field}'
-                }), 400
+        if 'line_name' not in data:
+            return jsonify({
+                'status': 'error',
+                'message': '缺少必需参数: line_name'
+            }), 400
         
-        # 获取参数
-        bus_data = np.array(data['busData'])
-        branch_data = np.array(data['branchData'])
-        voltage_limits = tuple(data['voltageLimits'])
-        key_nodes = data['keyNodes']
-        tunable_nodes = [tuple(node) for node in data['tunableNodes']]
+        line_name = data['line_name']
+        if not line_name or not isinstance(line_name, str):
+            return jsonify({
+                'status': 'error',
+                'message': 'line_name 必须是有效的字符串'
+            }), 400
         
         # 获取训练参数
         params = data.get('parameters', {})
-        ub = params.get('UB', 10.38)
-        sb = params.get('SB', 10)
         max_episodes = params.get('max_episodes', 800)
         max_steps = params.get('max_steps', 3)
-        model_name = params.get('model_name', f'td3_model_{datetime.now().strftime("%Y%m%d_%H%M%S")}')
+        sb = params.get('SB', 10.0)
+        pr = params.get('pr', 1e-6)  # 潮流收敛精度，默认 1e-6
+        
+        # 验证训练参数
+        if not isinstance(max_episodes, int) or max_episodes <= 0:
+            return jsonify({
+                'status': 'error',
+                'message': 'max_episodes 必须是正整数'
+            }), 400
+        
+        if not isinstance(max_steps, int) or max_steps <= 0:
+            return jsonify({
+                'status': 'error',
+                'message': 'max_steps 必须是正整数'
+            }), 400
         
         # 初始化训练状态
         training_status.update({
             'is_training': True,
+            'line_name': line_name,
+            'model_name': MODEL_FILENAME_PREFIX,
             'current_episode': 0,
             'total_episodes': max_episodes,
             'current_reward': 0,
             'current_loss_rate': 0,
             'best_loss_rate': float('inf'),
-            'message': '训练初始化中...',
-            'start_time': datetime.now().isoformat()
+            'message': '正在加载训练数据...',
+            'start_time': datetime.now().isoformat(),
+            'error': None  # 确保错误字段存在
         })
         
         # 定义进度回调函数
@@ -98,19 +116,48 @@ def start_training():
         def train_in_background():
             global training_status
             try:
-                model_save_path = os.path.join(MODELS_DIR, f'{model_name}.pth')
+                # 加载训练数据（从文件读取）
+                training_status['message'] = '正在读取训练数据...'
+                print(f"\n=== 开始加载训练数据 ===")
+                print(f"线路名称: {line_name}")
                 
+                training_data = load_training_data(line_name, TRAINING_DATA_DIR)
+                
+                # 提取数据
+                bus_data = training_data['bus_data']
+                branch_data = training_data['branch_data']
+                voltage_limits = training_data['voltage_limits']
+                key_nodes = training_data['key_nodes']
+                tunable_q_nodes = training_data['tunable_q_nodes']
+                ub = training_data['ub']
+                
+                # 打印配置信息
+                print(f"电压上下限: [{voltage_limits[0]:.2f}kV, {voltage_limits[1]:.2f}kV]")
+                print(f"关键节点索引: {key_nodes} (共{len(key_nodes)}个)")
+                print(f"可调节无功节点: {[node[3] for node in tunable_q_nodes]} (共{len(tunable_q_nodes)}个)")
+                print(f"基准电压UB: {ub:.2f}kV")
+                print(f"基准功率SB: {sb:.2f}MVA")
+                print(f"Bus节点数: {bus_data.shape[0]}")
+                print(f"支路数: {branch_data.shape[0]}")
+                
+                training_status['message'] = '训练数据加载完成，开始训练...'
+                
+                # 构建模型保存路径
+                model_save_path = os.path.join(MODELS_DIR, f'{MODEL_FILENAME_PREFIX}.pth')
+                
+                # 执行训练
                 result = train_td3_model(
                     bus_data=bus_data,
                     branch_data=branch_data,
                     voltage_limits=voltage_limits,
                     key_nodes=key_nodes,
-                    tunable_q_nodes=tunable_nodes,
+                    tunable_q_nodes=tunable_q_nodes,
                     ub=ub,
                     sb=sb,
                     max_episodes=max_episodes,
                     max_steps=max_steps,
                     model_save_path=model_save_path,
+                    pr=pr,
                     progress_callback=progress_callback
                 )
                 
@@ -119,10 +166,19 @@ def start_training():
                 training_status['result'] = result
                 training_status['end_time'] = datetime.now().isoformat()
                 
+            except FileNotFoundError as e:
+                training_status['is_training'] = False
+                training_status['message'] = f'训练数据文件不存在: {str(e)}'
+                training_status['error'] = str(e)
+            except ValueError as e:
+                training_status['is_training'] = False
+                training_status['message'] = f'训练数据格式错误: {str(e)}'
+                training_status['error'] = str(e)
             except Exception as e:
                 training_status['is_training'] = False
                 training_status['message'] = f'训练失败: {str(e)}'
                 training_status['error'] = str(e)
+                print(traceback.format_exc())
         
         # 启动训练线程
         train_thread = threading.Thread(target=train_in_background)
@@ -133,7 +189,8 @@ def start_training():
             'status': 'success',
             'message': '训练任务已启动',
             'data': {
-                'model_name': model_name,
+                'line_name': line_name,
+                'model_name': MODEL_FILENAME_PREFIX,
                 'total_episodes': max_episodes
             }
         })

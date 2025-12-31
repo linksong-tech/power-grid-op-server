@@ -18,9 +18,16 @@ def get_training_status_info(training_status):
         Flask response
     """
     try:
+        # 复制状态字典，处理 Infinity 值（JSON 不支持 Infinity）
+        status_copy = training_status.copy()
+        
+        # 将 Infinity 转换为 None 或一个很大的数字，前端会处理
+        if status_copy.get('best_loss_rate') == float('inf'):
+            status_copy['best_loss_rate'] = None  # 前端会显示为 '-'
+        
         return jsonify({
             'status': 'success',
-            'data': training_status
+            'data': status_copy
         })
     except Exception as e:
         return jsonify({

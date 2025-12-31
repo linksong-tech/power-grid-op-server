@@ -22,12 +22,18 @@ os.makedirs(TRAINING_DATA_DIR, exist_ok=True)
 # 训练状态管理
 training_status = {
     'is_training': False,
+    'line_name': None,  # 线路名称
+    'model_name': None,  # 模型名称
     'current_episode': 0,
     'total_episodes': 0,
     'current_reward': 0,
     'current_loss_rate': 0,
     'best_loss_rate': float('inf'),
-    'message': ''
+    'message': '',
+    'start_time': None,
+    'end_time': None,
+    'result': None,
+    'error': None
 }
 
 
