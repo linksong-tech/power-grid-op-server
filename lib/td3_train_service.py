@@ -12,6 +12,7 @@ import random
 import datetime
 import os
 import glob
+import uuid
 from typing import Dict, List, Tuple, Optional, Callable
 from td3_core import ActorNetwork, CriticNetwork, power_flow_calculation
 
@@ -128,10 +129,9 @@ class TD3TrainService:
 
 
 def save_best_model(agent: TD3TrainService, model_save_dir: str, filename: str, 
-                    best_loss_rate: float, current_loss_rate: float) -> float:
+                    best_loss_rate: float, current_loss_rate: float, training_id: str) -> float:
     """
-    只保存最优模型，删除旧的非最优模型
-    参考 td3onesample.py 的实现
+    保存最优模型（同一次训练只保留一个最优模型，不同训练的模型都保留）
     
     Args:
         agent: TD3训练服务实例
@@ -139,29 +139,31 @@ def save_best_model(agent: TD3TrainService, model_save_dir: str, filename: str,
         filename: 模型基础名称（如 "M1"）
         best_loss_rate: 当前最优网损率
         current_loss_rate: 当前轮次网损率
+        training_id: 训练ID（用于区分不同训练）
     
     Returns:
         更新后的最优网损率
     """
     if current_loss_rate < best_loss_rate and current_loss_rate < 15:
-        # 删除旧的最优模型
-        old_models = glob.glob(os.path.join(model_save_dir, f"{filename}_*.pth"))
+        # 删除同一次训练的旧模型（通过 training_id 识别）
+        old_models = glob.glob(os.path.join(model_save_dir, f"{filename}_{training_id}_*.pth"))
         for old_model in old_models:
             try:
                 os.remove(old_model)
+                print(f"删除同次训练的旧模型: {os.path.basename(old_model)}")
             except Exception as e:
                 print(f"删除旧模型失败: {old_model}, 错误: {e}")
         
-        # 生成新的模型文件名（格式：M1_MMDD_HHMMSS.pth）
+        # 生成新的模型文件名（格式：M1_训练ID_MMDD_HHMMSS.pth）
         current_time = datetime.datetime.now()
         time_str = current_time.strftime("%m%d_%H%M%S")
-        save_filename = f"{filename}_{time_str}.pth"
+        save_filename = f"{filename}_{training_id}_{time_str}.pth"
         save_path = os.path.join(model_save_dir, save_filename)
         
         # 保存新的最优模型
         agent.save_model(save_path)
         best_loss_rate = current_loss_rate
-        print(f"更新最优模型，网损率: {best_loss_rate:.4f}%")
+        print(f"保存最优模型: {save_filename}，网损率: {best_loss_rate:.4f}%")
     
     return best_loss_rate
 
@@ -178,6 +180,7 @@ def train_td3_model(
     max_steps: int = 3,
     model_save_path: str = "td3_model.pth",
     pr: float = 1e-6,
+    training_id: str = None,
     progress_callback: Optional[Callable] = None
 ) -> Dict:
     """
@@ -195,6 +198,7 @@ def train_td3_model(
         max_steps: 每轮最大步数
         model_save_path: 模型保存路径
         pr: 潮流收敛精度（默认 1e-6）
+        training_id: 训练ID（用于区分不同训练，默认自动生成）
         progress_callback: 进度回调函数 callback(episode, reward, loss_rate)
     
     Returns:
@@ -208,6 +212,9 @@ def train_td3_model(
             }
         }
     """
+    # 生成训练ID（如果未提供）
+    if training_id is None:
+        training_id = str(uuid.uuid4())[:8]  # 使用UUID的前8位，简短且唯一
     v_min, v_max = voltage_limits
     state_dim = len(key_nodes)
     action_dim = len(tunable_q_nodes)
@@ -242,6 +249,7 @@ def train_td3_model(
     best_loss_rate = float('inf')
     
     print(f"\n=== 开始训练TD3模型 ===")
+    print(f"训练ID: {training_id}")
     print(f"状态维度: {state_dim}, 动作维度: {action_dim}")
     print(f"训练轮次: {max_episodes}, 每轮步数: {max_steps}")
     print(f"潮流收敛精度: {pr}")
@@ -284,7 +292,8 @@ def train_td3_model(
             model_save_dir=model_save_dir,
             filename=filename_prefix,
             best_loss_rate=best_loss_rate,
-            current_loss_rate=episode_loss_rate
+            current_loss_rate=episode_loss_rate,
+            training_id=training_id
         )
         
         # 打印训练进度（每 50 个 episode）
@@ -299,8 +308,8 @@ def train_td3_model(
     final_model_path = None
     if best_loss_rate < 15:
         model_save_dir = os.path.dirname(model_save_path) if os.path.dirname(model_save_path) else os.getcwd()
-        # 查找最新的 M1_*.pth 模型文件
-        model_files = glob.glob(os.path.join(model_save_dir, "M1_*.pth"))
+        # 查找当前训练的模型文件（通过 training_id 识别）
+        model_files = glob.glob(os.path.join(model_save_dir, f"M1_{training_id}_*.pth"))
         if model_files:
             # 按修改时间排序，获取最新的
             model_files.sort(key=os.path.getmtime, reverse=True)
