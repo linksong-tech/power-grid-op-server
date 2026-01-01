@@ -300,9 +300,9 @@ def train_td3_model(
         if episode % 50 == 0:
             print(f"Episode {episode:3d} | 奖励: {episode_reward:6.2f} | 网损率: {episode_loss_rate:.4f}% | 最优网损: {best_loss_rate:.4f}%")
         
-        # 进度回调
+        # 进度回调（episode 从 0 开始，显示时 +1）
         if progress_callback:
-            progress_callback(episode, episode_reward, episode_loss_rate)
+            progress_callback(episode + 1, episode_reward, episode_loss_rate)
     
     # 获取最终保存的模型路径
     final_model_path = None

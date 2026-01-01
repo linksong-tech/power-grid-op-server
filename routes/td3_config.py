@@ -33,7 +33,12 @@ training_status = {
     'start_time': None,
     'end_time': None,
     'result': None,
-    'error': None
+    'error': None,
+    'training_history': {
+        'rewards': [],
+        'loss_rates': []
+    },
+    'logs': []  # 训练日志
 }
 
 

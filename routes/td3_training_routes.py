@@ -89,6 +89,8 @@ def start_training():
             }), 400
         
         # 初始化训练状态
+        # 注意：先重置关键进度字段，避免前端获取到上次训练的完成状态
+        training_status.clear()
         training_status.update({
             'is_training': True,
             'line_name': line_name,
@@ -100,7 +102,12 @@ def start_training():
             'best_loss_rate': float('inf'),
             'message': '正在加载训练数据...',
             'start_time': datetime.now().isoformat(),
-            'error': None  # 确保错误字段存在
+            'error': None,
+            'training_history': {
+                'rewards': [],
+                'loss_rates': []
+            },
+            'logs': []
         })
         
         # 定义进度回调函数
@@ -111,6 +118,24 @@ def start_training():
             if loss_rate < training_status['best_loss_rate']:
                 training_status['best_loss_rate'] = loss_rate
             training_status['message'] = f'训练中: Episode {episode}/{max_episodes}'
+            
+            # 更新训练历史数据
+            training_status['training_history']['rewards'].append(reward)
+            training_status['training_history']['loss_rates'].append(loss_rate)
+            
+            # 添加训练日志（对象格式）
+            log_entry = {
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'episode': episode,
+                'reward': round(reward, 2),
+                'loss_rate': round(loss_rate, 4),
+                'best_loss_rate': round(training_status['best_loss_rate'], 4)
+            }
+            training_status['logs'].append(log_entry)
+            
+            # 限制日志数量，只保留最近1000条
+            if len(training_status['logs']) > 1000:
+                training_status['logs'] = training_status['logs'][-1000:]
         
         # 在后台线程中执行训练
         def train_in_background():
@@ -212,4 +237,3 @@ def get_training_status():
 def stop_training():
     """停止训练"""
     return stop_training_task(training_status)
-
