@@ -19,6 +19,9 @@ RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debia
 # 复制requirements文件
 COPY requirements.txt .
 
+# 国内pip镜像
+RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+
 # 安装Python依赖
 RUN pip install --no-cache-dir -r requirements.txt
 
