@@ -29,7 +29,7 @@ class TD3TrainService:
             action_dim: 动作维度（可调无功节点数量）
             max_action: 最大动作值
         """
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cpu")
         
         # 初始化网络
         self.actor = ActorNetwork(state_dim, action_dim, max_action).to(self.device)

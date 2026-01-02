@@ -33,7 +33,7 @@ class TD3InferenceService:
             key_nodes: 关键节点索引列表
             max_action: 最大动作值
         """
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cpu")
         
         # 加载模型
         self.actor = ActorNetwork(state_dim, action_dim, max_action).to(self.device)
