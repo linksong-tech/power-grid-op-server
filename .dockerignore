@@ -63,3 +63,8 @@ README.md
 .env.development.local
 .env.test.local
 .env.production.local
+
+data
+results
+/venv
+td3_training_data
