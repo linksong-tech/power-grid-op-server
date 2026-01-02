@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-强化学习智能体通用验证程序
-功能：批量读取测试断面，自动加载配置，对比RL与PSO性能并生成评估报告
+强化学习智能体通用验证程序（无PyTorch版本）
+功能：批量读取测试断面，自动加载配置，对比RL与PSO性能并生成评估报告+可视化图表
+适配：.npz格式模型文件，纯NumPy推理，运算结果与原Torch版本严格一致
 """
-
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 import copy
-import torch
-import torch.nn as nn
 import random
 import pandas as pd
 import os
 import glob
 from pathlib import Path
+import warnings
+warnings.filterwarnings('ignore')  # 忽略matplotlib字体警告
 
 # -------------------------- 全局配置：路径定义 --------------------------
 # 获取程序所在目录
@@ -26,7 +26,10 @@ VOLT_CONFIG_PATH = PROJECT_ROOT / "POWERdata" / "C5336" / "modeldata" / "volcst_
 KEYNODE_CONFIG_PATH = PROJECT_ROOT / "POWERdata" / "C5336" / "modeldata" / "kvnd_C5336.xlsx"
 BRANCH_CONFIG_PATH = PROJECT_ROOT / "POWERdata" / "C5336" / "modeldata" / "branch_C5336.xlsx"
 # 测试样本目录
-TEST_DATA_DIR = PROJECT_ROOT / "POWERdata" / "C5336" / "test"
+TEST_DATA_DIR = PROJECT_ROOT / "POWERdata" / "C5336" / "hisdata" / "pvdatax"
+# 可视化结果保存目录（保留但不再使用）
+VISUALIZATION_DIR = PROJECT_ROOT / "visualization_results"
+VISUALIZATION_DIR.mkdir(exist_ok=True)  # 自动创建目录
 
 # -------------------------- 全局参数初始化 --------------------------
 SB = 10  # 基准功率 MVA
@@ -48,7 +51,50 @@ PERFORMANCE_THRESHOLDS = {
     "不合格": {"voltage_error": float('inf'), "loss_error": float('inf')}
 }
 
-# -------------------------- 配置读取函数（增加容错+格式校验） --------------------------
+# -------------------------- NumPy版本Actor网络（严格对齐原Torch版本） --------------------------
+DTYPE = np.float32  # 与原Torch float32保持一致
+
+def relu(x: np.ndarray) -> np.ndarray:
+    """ReLU激活函数（对齐Torch的nn.ReLU）"""
+    return np.maximum(0, x).astype(DTYPE)
+
+def tanh(x: np.ndarray) -> np.ndarray:
+    """Tanh激活函数（对齐Torch的nn.Tanh）"""
+    return np.tanh(x).astype(DTYPE)
+
+class ActorNetworkNumpy:
+    """纯NumPy实现的Actor网络（严格复刻原Torch版本结构）"""
+    def __init__(self, state_dim: int, action_dim: int, max_action: float):
+        self.state_dim = state_dim
+        self.action_dim = action_dim
+        self.max_action = max_action
+        # 初始化参数容器（与训练时的命名一致）
+        self.params = {
+            "w1": None, "b1": None,
+            "w2": None, "b2": None,
+            "w3": None, "b3": None,
+            "w4": None, "b4": None
+        }
+    
+    def load_params(self, params_dict: dict):
+        """加载从npz文件读取的Actor参数"""
+        # 映射npz中的参数名（actor_w1 -> w1）
+        for key in self.params.keys():
+            npz_key = f"actor_{key}"
+            if npz_key not in params_dict:
+                raise ValueError(f"模型参数缺少{npz_key}，可用参数：{list(params_dict.keys())}")
+            self.params[key] = params_dict[npz_key].astype(DTYPE)
+    
+    def forward(self, state: np.ndarray) -> np.ndarray:
+        """前向传播（严格复刻原Torch的Sequential逻辑）"""
+        # 输入：(1, state_dim) 输出：(1, action_dim)
+        x = relu(np.dot(state, self.params["w1"]) + self.params["b1"])
+        x = relu(np.dot(x, self.params["w2"]) + self.params["b2"])
+        x = relu(np.dot(x, self.params["w3"]) + self.params["b3"])
+        x = tanh(np.dot(x, self.params["w4"]) + self.params["b4"])
+        return self.max_action * x
+
+# -------------------------- 配置读取函数（保持不变，增加容错+格式校验） --------------------------
 def load_pv_config(bus_data=None):
     """
     读取可调无功节点配置
@@ -279,13 +325,13 @@ def load_test_samples():
                 print(f"警告：{file_path} bus表无有效数据，跳过该文件")
                 continue
             
-            bus_array = np.array(bus_data)
+            bus_array = np.array(bus_data).reshape(-1, 3)  # 修正：直接reshape为n×3
             
             samples.append({
                 "file_path": file_path,
                 "time": sample_time,
                 "ub": slack_voltage,
-                "bus": bus_array
+                "bus": bus_array  # 修正：存储reshape后的二维数组
             })
             print(f"成功加载测试样本：{sample_time}（{Path(file_path).name}）")
         except Exception as e:
@@ -297,7 +343,7 @@ def load_test_samples():
     
     return samples
 
-# -------------------------- 核心工具函数 --------------------------
+# -------------------------- 核心工具函数（保持不变） --------------------------
 def power_flow(Bus, tunable_q_values, tunable_nodes, branch_data, sb=10, ub=10.38):
     """
     潮流计算（适配动态配置）
@@ -361,12 +407,9 @@ def power_flow(Bus, tunable_q_values, tunable_nodes, branch_data, sb=10, ub=10.3
         while s >= 0:
             i = np.where(TempBranch[:, 1] == TempBranch[s, 2])[0]
             if i.size == 0:
-                s1 = np.vstack([s1, TempBranch[s, :]])
+                s1 = np.vstack([s1, TempBranch[s, :]]) if s1.size else TempBranch[s, :].reshape(1, -1)
             else:
-                if s2.size > 0:
-                    s2 = np.vstack([s2, TempBranch[s, :]])
-                else:
-                    s2 = TempBranch[s, :].reshape(1, -1)
+                s2 = np.vstack([s2, TempBranch[s, :]]) if s2.size else TempBranch[s, :].reshape(1, -1)
             s -= 1
         TempBranch = s2.copy()
     
@@ -531,41 +574,20 @@ def pso_optimization(Bus, tunable_nodes, branch_data, v_min, v_max, sb=10, ub=10
     
     return gbest, gbest_fitness
 
-# -------------------------- 强化学习推理类 --------------------------
-class ActorNetwork(nn.Module):
-    """Actor网络（状态维度为关键节点数，仅电压输入）"""
-    def __init__(self, state_dim, action_dim, max_action):
-        super(ActorNetwork, self).__init__()
-        self.max_action = max_action
-        
-        self.network = nn.Sequential(
-            nn.Linear(state_dim, 128),
-            nn.ReLU(),
-            nn.Linear(128, 64),
-            nn.ReLU(),
-            nn.Linear(64, 32),
-            nn.ReLU(),
-            nn.Linear(32, action_dim),
-            nn.Tanh()
-        )
-    
-    def forward(self, state):
-        return self.max_action * self.network(state)
-
-class TD3Inference:
-    """TD3推理类（使用全局配置）"""
+# -------------------------- NumPy版本RL推理类（替换原Torch版本） --------------------------
+class TD3InferenceNumpy:
+    """纯NumPy实现的TD3推理类（严格对齐原Torch版本逻辑）"""
     def __init__(self, state_dim, action_dim, max_action, model_path, v_min, v_max, key_nodes):
-        self.device = torch.device("cpu")
-        print(f"\n使用设备: {self.device}")
+        print(f"\n使用设备: CPU (NumPy float32)")
         
-        # 初始化actor网络
-        self.actor = ActorNetwork(state_dim, action_dim, max_action).to(self.device)
+        # 初始化NumPy版本Actor网络
+        self.actor = ActorNetworkNumpy(state_dim, action_dim, max_action)
         
-        # 加载训练好的模型权重
+        # 加载.npz模型文件
         try:
-            checkpoint = torch.load(model_path, map_location=self.device)
-            self.actor.load_state_dict(checkpoint['actor_state_dict'])
-            self.actor.eval()  # 推理模式
+            model_data = np.load(model_path)
+            self.actor.load_params(model_data)
+            model_data.close()
             print(f"成功加载模型：{model_path}")
         except Exception as e:
             raise ValueError(f"\n模型加载失败：{e}\n请检查模型文件路径和完整性！")
@@ -586,14 +608,14 @@ class TD3Inference:
         # 1. 提取关键节点的观测电压
         key_node_voltages = observed_voltages[self.key_nodes]  # 形状：(n,)
         
-        # 2. 电压归一化
+        # 2. 电压归一化（与训练时完全一致）
         normalized_voltages = (key_node_voltages - self.v_min) / (self.v_max - self.v_min) * 2 - 1
         normalized_voltages = np.clip(normalized_voltages, -1, 1)
         
-        return normalized_voltages
+        return normalized_voltages.astype(DTYPE)
     
     def denormalize_action(self, action, tunable_nodes):
-        """动作反归一化"""
+        """动作反归一化（与训练时完全一致）"""
         q_mins = np.array([node[1] for node in tunable_nodes])
         q_maxs = np.array([node[2] for node in tunable_nodes])
         
@@ -605,22 +627,20 @@ class TD3Inference:
         return actual_actions
     
     def predict(self, observed_voltages, tunable_nodes):
-        """预测最优无功配置"""
+        """预测最优无功配置（纯NumPy推理）"""
         # 构建状态
         state = self._build_state(observed_voltages)
+        # 转换为模型输入格式 (1, state_dim)
+        state_input = state.reshape(1, -1)
         
-        # 转换为模型输入格式
-        state_tensor = torch.FloatTensor(state.reshape(1, -1)).to(self.device)
-        
-        # 模型预测
-        with torch.no_grad():
-            normalized_action = self.actor(state_tensor).cpu().data.numpy().flatten()
+        # 模型前向传播（无梯度计算，纯推理）
+        normalized_action = self.actor.forward(state_input).flatten()
         
         # 反归一化
         actual_action = self.denormalize_action(normalized_action, tunable_nodes)
         return actual_action
 
-# -------------------------- 性能评估函数 --------------------------
+# -------------------------- 性能评估函数（保持不变） --------------------------
 def calculate_errors(rl_voltages, pso_voltages, rl_loss, pso_loss):
     """
     计算误差
@@ -653,7 +673,7 @@ def evaluate_performance(voltage_error, loss_error):
     else:
         return "不合格"
 
-# -------------------------- 辅助打印函数：打印无功调节策略 --------------------------
+# -------------------------- 辅助打印函数（保持不变） --------------------------
 def print_reactive_power_strategy(tunable_nodes, rl_q, pso_q):
     """
     打印RL和PSO的无功调节策略（关联节点名称）
@@ -673,9 +693,186 @@ def print_reactive_power_strategy(tunable_nodes, rl_q, pso_q):
         limit_str = f"[{q_min:.4f}, {q_max:.4f}]"
         print(f"{node_name:<20} {rl_str:<18} {pso_str:<18} {limit_str:<20}")
 
-# -------------------------- 主验证函数 --------------------------
+# -------------------------- 可视化函数（保持不变，仅保留指定3个图表） --------------------------
+def setup_plot_style():
+    """设置绘图样式（修复matplotlib版本兼容和字体问题）"""
+    # 适配macOS的中文字体
+    plt.rcParams["font.family"] = ["Heiti TC", "PingFang SC", "Arial Unicode MS", "sans-serif"]
+    plt.rcParams["axes.unicode_minus"] = False
+    plt.rcParams["figure.figsize"] = (12, 8)
+    plt.rcParams["font.size"] = 10
+    plt.rcParams["axes.grid"] = True
+    plt.rcParams["grid.alpha"] = 0.3
+    plt.rcParams["savefig.dpi"] = 300
+
+def plot_error_distribution(df_results):
+    """
+    图3：电压误差和网损误差分布箱线图（改为直接显示）
+    """
+    setup_plot_style()
+    
+    # 准备数据
+    voltage_errors = df_results["电压平均误差(%)"].values
+    loss_errors = df_results["网损误差(%)"].values
+    
+    # 绘图
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 7))
+    
+    # 电压误差箱线图
+    bp1 = ax1.boxplot(voltage_errors, patch_artist=True, labels=['电压平均误差'])
+    bp1['boxes'][0].set_facecolor('#85C1E9')
+    ax1.set_title('电压平均误差分布', fontsize=14, fontweight='bold')
+    ax1.set_ylabel('误差值 (%)', fontsize=12)
+    ax1.grid(True, alpha=0.3)
+    
+    # 添加统计信息
+    ax1.text(0.7, 0.95, 
+             f'均值: {np.mean(voltage_errors):.2f}%\n中位数: {np.median(voltage_errors):.2f}%\n最大值: {np.max(voltage_errors):.2f}%\n最小值: {np.min(voltage_errors):.2f}%',
+             transform=ax1.transAxes, 
+             bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8),
+             fontsize=10)
+    
+    # 网损误差箱线图
+    bp2 = ax2.boxplot(loss_errors, patch_artist=True, labels=['网损误差'])
+    bp2['boxes'][0].set_facecolor('#F8C471')
+    ax2.set_title('网损误差分布', fontsize=14, fontweight='bold')
+    ax2.set_ylabel('误差值 (%)', fontsize=12)
+    ax2.grid(True, alpha=0.3)
+    
+    # 添加统计信息
+    ax2.text(0.7, 0.95, 
+             f'均值: {np.mean(loss_errors):.2f}%\n中位数: {np.median(loss_errors):.2f}%\n最大值: {np.max(loss_errors):.2f}%\n最小值: {np.min(loss_errors):.2f}%',
+             transform=ax2.transAxes, 
+             bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8),
+             fontsize=10)
+    
+    # 整体标题
+    fig.suptitle('RL相对PSO的误差分布', fontsize=16, fontweight='bold', y=0.98)
+    
+    # 直接显示图表（不再保存）
+    plt.tight_layout()
+    plt.show()
+
+def plot_performance_distribution(df_results):
+    """
+    图4：性能评估等级分布饼图（修复explode参数长度问题，改为直接显示）
+    """
+    setup_plot_style()
+    
+    # 统计各等级数量
+    performance_counts = df_results["性能评估"].value_counts()
+    labels = performance_counts.index
+    sizes = performance_counts.values
+    
+    # 动态生成explode数组，长度和实际等级数量一致
+    explode = [0.05] * len(labels)  # 每个等级都轻微突出
+    
+    # 动态匹配颜色（按实际等级数量取色）
+    color_map = {
+        "优秀": '#27AE60',
+        "良好": '#F39C12',
+        "合格": '#E67E22',
+        "不合格": '#E74C3C'
+    }
+    colors = [color_map.get(label, '#95A5A6') for label in labels]
+    
+    # 绘图
+    fig, ax = plt.subplots(figsize=(10, 10))
+    wedges, texts, autotexts = ax.pie(sizes, 
+                                      explode=explode,
+                                      labels=labels,
+                                      colors=colors,
+                                      autopct='%1.1f%%',
+                                      shadow=True,
+                                      startangle=90,
+                                      textprops={'fontsize': 12})
+    
+    # 美化百分比标签
+    for autotext in autotexts:
+        autotext.set_color('white')
+        autotext.set_fontweight('bold')
+    
+    ax.set_title('RL智能体性能评估等级分布', fontsize=16, fontweight='bold', pad=20)
+    
+    # 添加数量标注
+    total = sum(sizes)
+    for i, (label, size) in enumerate(zip(labels, sizes)):
+        ax.text(1.3, 0.9 - i*0.15, 
+                f'{label}: {size}个样本 ({size/total*100:.1f}%)',
+                fontsize=11,
+                bbox=dict(boxstyle="round,pad=0.2", facecolor=colors[i], alpha=0.3))
+    
+    # 直接显示图表（不再保存）
+    plt.tight_layout()
+    plt.show()
+
+def plot_loss_scatter(df_results):
+    """
+    图5：RL vs PSO 网损率散点图（相关性分析，改为直接显示）
+    """
+    setup_plot_style()
+    
+    # 准备数据
+    rl_loss = df_results["RL网损率(%)"].values
+    pso_loss = df_results["PSO网损率(%)"].values
+    
+    # 计算相关系数
+    corr = np.corrcoef(rl_loss, pso_loss)[0, 1]
+    
+    # 绘图
+    fig, ax = plt.subplots(figsize=(10, 8))
+    scatter = ax.scatter(pso_loss, rl_loss, c='#3498DB', alpha=0.7, s=80, edgecolors='black', linewidth=0.5)
+    
+    # 添加等值线（y=x）
+    min_val = min(min(rl_loss), min(pso_loss))
+    max_val = max(max(rl_loss), max(pso_loss))
+    ax.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, label='等值线 (RL=PSO)')
+    
+    # 美化
+    ax.set_title(f'RL vs PSO 网损率相关性分析 (相关系数: {corr:.3f})', fontsize=16, fontweight='bold', pad=20)
+    ax.set_xlabel('PSO网损率 (%)', fontsize=12)
+    ax.set_ylabel('RL网损率 (%)', fontsize=12)
+    ax.legend(fontsize=11)
+    
+    # 添加趋势线
+    z = np.polyfit(pso_loss, rl_loss, 1)
+    p = np.poly1d(z)
+    ax.plot(pso_loss, p(pso_loss), "g-", alpha=0.8, label=f'趋势线 (y={z[0]:.3f}x+{z[1]:.3f})')
+    ax.legend(fontsize=10)
+    
+    # 直接显示图表（不再保存）
+    plt.tight_layout()
+    plt.show()
+
+def generate_all_visualizations(df_results):
+    """生成所有保留的可视化图表（改为直接显示）"""
+    print(f"\n=== 开始生成可视化图表 ===")
+    
+    if len(df_results) == 0:
+        print("⚠️  无验证结果，跳过可视化生成")
+        return
+    
+    try:
+        # 仅保留指定的3个图表
+        print("📊 显示电压误差和网损误差分布箱线图...")
+        plot_error_distribution(df_results)
+        
+        print("📊 显示RL智能体性能评估等级分布饼图...")
+        plot_performance_distribution(df_results)
+        
+        print("📊 显示RL vs PSO 网损率相关性散点图...")
+        plot_loss_scatter(df_results)
+        
+        print(f"\n🎉 所有可视化图表已显示完成！")
+        
+    except Exception as e:
+        print(f"⚠️  可视化生成过程出错：{e}")
+        import traceback
+        traceback.print_exc()
+
+# -------------------------- 主验证函数（适配NumPy推理） --------------------------
 def batch_validate_model(model_path):
-    """批量验证模型"""
+    """批量验证模型（适配NumPy版本）"""
     # 1. 加载全局配置
     global v_min, v_max, key_nodes, Branch
     print("=== 开始加载配置文件 ===")
@@ -694,18 +891,18 @@ def batch_validate_model(model_path):
         test_samples = load_test_samples()
         print(f"共加载{len(test_samples)}个有效测试样本")
         
-        # 3. 初始化RL推理器
+        # 3. 初始化RL推理器（NumPy版本）
         state_dim = len(key_nodes)
         # 先加载一个样本获取可调节点数量
-        first_sample_bus = test_samples[0]["bus"].reshape(-1, 3)
+        first_sample_bus = test_samples[0]["bus"]  # 已修正为二维数组
         action_dim = len(load_pv_config(first_sample_bus))
         max_action = 1.0
         
-        print(f"\n=== 初始化RL推理器 ===")
+        print(f"\n=== 初始化RL推理器（NumPy版本）===")
         print(f"状态维度：{state_dim}（关键节点数）")
         print(f"动作维度：{action_dim}（可调无功节点数）")
         
-        rl_infer = TD3Inference(
+        rl_infer = TD3InferenceNumpy(
             state_dim=state_dim,
             action_dim=action_dim,
             max_action=max_action,
@@ -724,8 +921,7 @@ def batch_validate_model(model_path):
             print(f"\n----- 处理样本 {idx+1}/{total_samples} -----")
             sample_time = sample["time"]
             ub = sample["ub"]
-            bus_flat = sample["bus"]
-            Bus_reshaped = bus_flat.reshape(-1, 3)
+            Bus_reshaped = sample["bus"]  # 已修正为二维数组
             
             print(f"样本时间：{sample_time}")
             print(f"基准电压：{ub}kV")
@@ -764,7 +960,7 @@ def batch_validate_model(model_path):
                 print(f"PSO优化失败：{e}，跳过该样本")
                 continue
             
-            # RL优化
+            # RL优化（NumPy版本）
             print("RL优化中...")
             try:
                 rl_q = rl_infer.predict(observed_voltages, tunable_q_nodes)
@@ -856,19 +1052,22 @@ def batch_validate_model(model_path):
         except Exception as e:
             print(f"\n保存报告失败：{e}")
         
+        # 6. 生成可视化图表（改为直接显示）
+        generate_all_visualizations(df_results)
+        
         return df_results
     
     except Exception as e:
         print(f"\n配置加载/验证失败：{e}")
         raise
 
-# -------------------------- 主函数 --------------------------
+# -------------------------- 主函数（适配NumPy版本） --------------------------
 if __name__ == "__main__":
-    # 模型路径（请替换为实际路径）
-    MODEL_PATH = "M1_1229_230322.pth"
+    # 模型路径（替换为你的.npz模型文件路径）
+    MODEL_PATH = "M1_0103_000110.npz"
     
-    # 设置中文显示
-    plt.rcParams["font.family"] = ["Heiti TC", "SimHei", "sans-serif"]
+    # 设置中文显示（适配macOS）
+    plt.rcParams["font.family"] = ["Heiti TC", "PingFang SC", "Arial Unicode MS", "sans-serif"]
     plt.rcParams["axes.unicode_minus"] = False
     
     # 执行批量验证
@@ -877,9 +1076,9 @@ if __name__ == "__main__":
     except FileNotFoundError as e:
         print(f"\n【错误】文件未找到：{e}")
         print("请检查：")
-        print("1. 模型文件路径是否正确")
+        print("1. 模型文件路径是否正确（.npz格式）")
         print("2. 配置文件路径（POWERdata/C5336/modeldata/）是否存在")
-        print("3. 测试样本目录（POWERdata/C5336/hisdata/pvdata/）是否存在")
+        print("3. 测试样本目录（POWERdata/C5336/hisdata/pvdatax/）是否存在")
     except ValueError as e:
         print(f"\n【错误】数据格式错误：{e}")
         print("请检查配置Excel文件的格式是否符合要求")

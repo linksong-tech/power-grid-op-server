@@ -272,7 +272,7 @@ class CriticNetwork(nn.Module):
 # -------------------------- TD3算法（保持不变，优化保存提示） --------------------------
 class TD3:
     def __init__(self, state_dim, action_dim, max_action):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cpu")
         print(f"使用设备: {self.device}")
         
         self.actor = ActorNetwork(state_dim, action_dim, max_action).to(self.device)
