@@ -2,6 +2,7 @@
 TD3优化相关配置和共享状态
 """
 import os
+import threading
 
 # 配置目录 - 统一收集到 td3_training_data 目录下
 BASE_DIR = 'td3_training_data'
@@ -41,8 +42,12 @@ training_status = {
     'logs': []  # 训练日志
 }
 
+# 批量评估/优化任务状态管理（用于前端轮询）
+# job_id -> job_status
+batch_jobs = {}
+batch_jobs_lock = threading.Lock()
+
 
 def get_lib_dir():
     """获取lib目录路径"""
     return os.path.join(os.path.dirname(os.path.dirname(__file__)), 'lib')
-

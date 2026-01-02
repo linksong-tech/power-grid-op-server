@@ -8,7 +8,7 @@ from flask import Blueprint
 td3_optimize_bp = Blueprint('td3_optimize', __name__)
 
 # 从各个子模块导入路由函数
-from .td3_optimize_routes import td3_optimize, td3_batch_optimize
+from .td3_optimize_routes import td3_optimize, td3_batch_optimize, get_td3_batch_status
 from .td3_model_routes import get_td3_models, get_td3_results, get_td3_result_detail, get_td3_template
 from .td3_training_routes import start_training, get_training_status, stop_training
 from .td3_sample_routes import upload_training_samples, get_training_samples, get_sample_detail
@@ -18,6 +18,7 @@ from .td3_data_routes import upload_powerdata_archive, get_powerdata_lines, get_
 # 注册所有路由到主蓝图
 td3_optimize_bp.add_url_rule('/api/td3-optimize/optimize', 'td3_optimize', td3_optimize, methods=['POST'])
 td3_optimize_bp.add_url_rule('/api/td3-optimize/batch', 'td3_batch_optimize', td3_batch_optimize, methods=['POST'])
+td3_optimize_bp.add_url_rule('/api/td3-optimize/batch-status/<job_id>', 'get_td3_batch_status', get_td3_batch_status, methods=['GET'])
 td3_optimize_bp.add_url_rule('/api/td3-optimize/models', 'get_td3_models', get_td3_models, methods=['GET'])
 td3_optimize_bp.add_url_rule('/api/td3-optimize/results', 'get_td3_results', get_td3_results, methods=['GET'])
 td3_optimize_bp.add_url_rule('/api/td3-optimize/results/<filename>', 'get_td3_result_detail', get_td3_result_detail, methods=['GET'])

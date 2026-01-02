@@ -8,6 +8,51 @@ import glob
 import pandas as pd
 import numpy as np
 from typing import List, Tuple, Dict
+from pathlib import Path
+
+
+def _extract_first_float(df: pd.DataFrame) -> float:
+    """
+    从一个 sheet 的 DataFrame 中提取第一个可解析为 float 的单元格。
+    用于兼容第一行是中文标题（如“母线电压”）的情况。
+    """
+    max_rows = min(20, df.shape[0])
+    max_cols = min(20, df.shape[1])
+    for r in range(max_rows):
+        for c in range(max_cols):
+            val = df.iat[r, c]
+            if pd.isna(val):
+                continue
+            try:
+                f = float(val)
+                if np.isfinite(f):
+                    return f
+            except Exception:
+                continue
+    raise ValueError("未找到可用的数值单元格")
+
+
+def _read_bus_matrix(file_path: str) -> np.ndarray:
+    """
+    读取 bus sheet，兼容第一行中文标题。
+    输出二维数组 (n, 3): [节点号, 有功, 无功]
+    """
+    df_bus = pd.read_excel(file_path, sheet_name="bus", header=None)
+    bus_rows: List[List[float]] = []
+    for _, row in df_bus.iterrows():
+        if len(row) < 3:
+            continue
+        try:
+            n = float(row.iloc[0])
+            p = float(row.iloc[1])
+            q = float(row.iloc[2])
+            bus_rows.append([n, p, q])
+        except Exception:
+            # 跳过标题行/空行/非数值行
+            continue
+    if not bus_rows:
+        raise ValueError("bus sheet 无有效数据行")
+    return np.array(bus_rows, dtype=float)
 
 
 def read_voltage_limits(line_dir: str, line_name: str) -> Tuple[float, float]:
@@ -180,25 +225,76 @@ def read_training_sample(line_dir: str, line_name: str) -> Tuple[np.ndarray, flo
     file_path = sample_files[0]
     
     try:
-        # 读取Bus数据（sheet=bus）
-        df_bus = pd.read_excel(file_path, sheet_name="bus", header=0)  # 列名：节点号 有功值 无功值
-        bus_data = []
-        for _, row in df_bus.iterrows():
-            bus_data.append([
-                int(row.iloc[0]),    # 节点号
-                float(row.iloc[1]),  # 有功值
-                float(row.iloc[2])   # 无功值
-            ])
-        # 确保Bus是二维数组
-        bus_array = np.array(bus_data)
-        
-        # 读取基准电压UB（sheet=slack）
-        df_slack = pd.read_excel(file_path, sheet_name="slack")
-        ub = float(df_slack.iloc[0, 0])  # slack sheet的第一个值
+        bus_array = _read_bus_matrix(file_path)
+
+        # 读取基准电压UB（sheet=slack，兼容中文标题）
+        df_slack = pd.read_excel(file_path, sheet_name="slack", header=None)
+        ub = _extract_first_float(df_slack)
         
         return bus_array, ub
     except Exception as e:
         raise ValueError(f'读取训练样本文件失败: {str(e)}')
+
+def read_test_samples(line_dir: str, line_name: str) -> List[Dict]:
+    """
+    读取测试样本数据（从 test 目录下的所有 Excel 文件）
+
+    文件格式约定（与训练样本一致）：
+    - sheet=bus: 节点号/有功/无功（至少3列）
+    - sheet=slack: 基准电压 UB
+    - sheet=date: 时间（可选，缺失则从文件名推断）
+
+    Returns:
+        List[Dict]: 每个样本为:
+          {
+            'time': str,
+            'ub': float,
+            'bus': List[float]  # 扁平化: [节点号, P, Q, ...]
+          }
+    """
+    test_dir = os.path.join(line_dir, 'test')
+    if not os.path.exists(test_dir):
+        raise FileNotFoundError(f'测试样本目录不存在: {test_dir}')
+
+    sample_files = sorted(glob.glob(os.path.join(test_dir, f'{line_name}_*.xlsx')))
+    if not sample_files:
+        raise FileNotFoundError(f'未找到测试样本文件: {test_dir}/{line_name}_*.xlsx')
+
+    samples: List[Dict] = []
+    for file_path in sample_files:
+        try:
+            bus_array = _read_bus_matrix(file_path)
+
+            # UB（sheet=slack，兼容中文标题）
+            df_slack = pd.read_excel(file_path, sheet_name="slack", header=None)
+            ub = _extract_first_float(df_slack)
+
+            # 时间（sheet=date，缺失则从文件名推断）
+            sample_time = None
+            try:
+                df_date = pd.read_excel(file_path, sheet_name="date", header=None)
+                # 常见格式：第0行是中文标题，第1行是值
+                if df_date.shape[0] >= 2 and not pd.isna(df_date.iloc[1, 0]):
+                    sample_time = str(df_date.iloc[1, 0])
+                elif df_date.shape[0] >= 1 and not pd.isna(df_date.iloc[0, 0]):
+                    sample_time = str(df_date.iloc[0, 0])
+            except Exception:
+                sample_time = None
+
+            if not sample_time or sample_time == 'nan':
+                stem = Path(file_path).stem
+                # e.g. C5336_YYYYMMDDHHMM
+                sample_time = stem.replace(f"{line_name}_", "")
+
+            samples.append({
+                'time': sample_time,
+                'ub': ub,
+                'bus': bus_array.reshape(-1).tolist(),
+            })
+        except Exception as e:
+            raise ValueError(f'读取测试样本文件失败: {file_path} - {str(e)}')
+
+    return samples
 
 
 def load_training_data(line_name: str, training_data_dir: str) -> Dict:
@@ -252,3 +348,19 @@ def load_training_data(line_name: str, training_data_dir: str) -> Dict:
         'ub': ub
     }
 
+
+def load_test_samples(line_name: str, training_data_dir: str) -> List[Dict]:
+    """
+    加载指定线路的全部测试样本
+
+    Args:
+        line_name: 线路名称（如 C5336）
+        training_data_dir: 训练数据根目录
+    """
+    line_dir = os.path.join(training_data_dir, line_name)
+    if not os.path.exists(line_dir):
+        raise FileNotFoundError(f'线路目录不存在: {line_dir}')
+    if not os.path.isdir(line_dir):
+        raise ValueError(f'路径不是目录: {line_dir}')
+
+    return read_test_samples(line_dir, line_name)
