@@ -7,9 +7,9 @@ TD3推理服务 - 纯NumPy版本
 import numpy as np
 from typing import Dict, List, Tuple, Optional
 
-from .td3_core.numpy_models import ActorNetworkNumpy
-from .td3_core.power_flow import power_flow_calculation
-from .td3_core.numpy_backend import DTYPE
+from td3_core.numpy_models import ActorNetworkNumpy
+from td3_core.power_flow import power_flow_calculation
+from td3_core.numpy_backend import DTYPE
 
 
 class TD3InferenceServiceNumpy:

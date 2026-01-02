@@ -13,12 +13,12 @@ import glob
 import uuid
 from typing import Dict, List, Tuple, Optional, Callable
 
-from .numpy_models import ActorNetworkNumpy, CriticNetworkNumpy
-from .numpy_backend import (
+from td3_core.numpy_models import ActorNetworkNumpy, CriticNetworkNumpy
+from td3_core.numpy_backend import (
     AdamOptimizer, clip_grad_norm, soft_update, copy_params,
     mse_loss_gradient, clip_array, DTYPE
 )
-from .power_flow import power_flow_calculation
+from td3_core.power_flow import power_flow_calculation
 
 
 class TD3TrainServiceNumpy:
