@@ -166,9 +166,15 @@ def start_training():
                 print(f"支路数: {branch_data.shape[0]}")
                 
                 training_status['message'] = '训练数据加载完成，开始训练...'
-                
-                # 构建模型保存路径
-                model_save_path = os.path.join(MODELS_DIR, f'{MODEL_FILENAME_PREFIX}.pth')
+
+                # 构建模型保存路径: TRAINING_DATA_DIR/{line_name}/agent/
+                agent_dir = os.path.join(TRAINING_DATA_DIR, line_name, 'agent')
+                os.makedirs(agent_dir, exist_ok=True)
+
+                # 生成带时间戳的模型文件名
+                timestamp = datetime.now().strftime('%m%d_%H%M%S')
+                model_filename = f'{MODEL_FILENAME_PREFIX}_{timestamp}.pth'
+                model_save_path = os.path.join(agent_dir, model_filename)
                 
                 # 执行训练
                 result = train_td3_model(

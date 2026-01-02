@@ -7,13 +7,12 @@ from datetime import datetime
 from flask import jsonify
 
 
-def get_models_list(models_dir, lib_dir):
+def get_models_list(training_data_dir):
     """
     获取可用的TD3模型列表
 
     Args:
-        models_dir: 模型目录
-        lib_dir: lib目录
+        training_data_dir: 训练数据目录，扫描各线路的agent目录
 
     Returns:
         Flask response
@@ -21,30 +20,22 @@ def get_models_list(models_dir, lib_dir):
     try:
         models = []
 
-        # 扫描models目录
-        if os.path.exists(models_dir):
-            for filename in os.listdir(models_dir):
-                if filename.endswith('.pth'):
-                    filepath = os.path.join(models_dir, filename)
-                    file_stat = os.stat(filepath)
-                    models.append({
-                        'filename': filename,
-                        'size': file_stat.st_size,
-                        'modified_time': datetime.fromtimestamp(file_stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
-                    })
-
-        # 扫描lib目录
-        if os.path.exists(lib_dir):
-            for filename in os.listdir(lib_dir):
-                if filename.endswith('.pth'):
-                    filepath = os.path.join(lib_dir, filename)
-                    file_stat = os.stat(filepath)
-                    models.append({
-                        'filename': filename,
-                        'size': file_stat.st_size,
-                        'modified_time': datetime.fromtimestamp(file_stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
-                        'location': 'lib'
-                    })
+        # 扫描training_data_dir下各线路的agent目录
+        if training_data_dir and os.path.exists(training_data_dir):
+            for line_name in os.listdir(training_data_dir):
+                agent_dir = os.path.join(training_data_dir, line_name, 'agent')
+                if os.path.isdir(agent_dir):
+                    for filename in os.listdir(agent_dir):
+                        if filename.endswith('.pth'):
+                            filepath = os.path.join(agent_dir, filename)
+                            file_stat = os.stat(filepath)
+                            models.append({
+                                'filename': filename,
+                                'line_name': line_name,
+                                'size': file_stat.st_size,
+                                'modified_time': datetime.fromtimestamp(file_stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
+                                'location': f'{line_name}/agent'
+                            })
 
         # 按修改时间排序
         models.sort(key=lambda x: x.get('modified_time', ''), reverse=True)

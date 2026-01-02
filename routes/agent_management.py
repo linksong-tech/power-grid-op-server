@@ -7,14 +7,14 @@ from datetime import datetime
 from flask import jsonify
 
 
-def get_agents_list(models_dir, lib_dir):
+def get_agents_list(training_data_dir, line_name):
     """
-    获取历史训练的智能体（模型）列表
+    获取指定线路的历史训练智能体（模型）列表
     包含模型的详细信息和训练历史
 
     Args:
-        models_dir: 模型目录
-        lib_dir: lib目录
+        training_data_dir: 训练数据目录
+        line_name: 线路名称
 
     Returns:
         Flask response
@@ -22,11 +22,12 @@ def get_agents_list(models_dir, lib_dir):
     try:
         agents = []
 
-        # 扫描models目录
-        if os.path.exists(models_dir):
-            for filename in os.listdir(models_dir):
+        # 扫描指定线路的agent目录
+        agent_dir = os.path.join(training_data_dir, line_name, 'agent')
+        if os.path.isdir(agent_dir):
+            for filename in os.listdir(agent_dir):
                 if filename.endswith('.pth'):
-                    filepath = os.path.join(models_dir, filename)
+                    filepath = os.path.join(agent_dir, filename)
                     file_stat = os.stat(filepath)
 
                     # 尝试读取对应的训练历史文件
@@ -42,30 +43,13 @@ def get_agents_list(models_dir, lib_dir):
                     agents.append({
                         'filename': filename,
                         'model_name': filename.replace('.pth', ''),
+                        'line_name': line_name,
                         'size': file_stat.st_size,
                         'size_mb': round(file_stat.st_size / 1024 / 1024, 2),
                         'created_time': datetime.fromtimestamp(file_stat.st_ctime).strftime('%Y-%m-%d %H:%M:%S'),
                         'modified_time': datetime.fromtimestamp(file_stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
                         'training_history': training_history,
-                        'location': 'models'
-                    })
-
-        # 扫描lib目录
-        if os.path.exists(lib_dir):
-            for filename in os.listdir(lib_dir):
-                if filename.endswith('.pth'):
-                    filepath = os.path.join(lib_dir, filename)
-                    file_stat = os.stat(filepath)
-
-                    agents.append({
-                        'filename': filename,
-                        'model_name': filename.replace('.pth', ''),
-                        'size': file_stat.st_size,
-                        'size_mb': round(file_stat.st_size / 1024 / 1024, 2),
-                        'created_time': datetime.fromtimestamp(file_stat.st_ctime).strftime('%Y-%m-%d %H:%M:%S'),
-                        'modified_time': datetime.fromtimestamp(file_stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
-                        'training_history': None,
-                        'location': 'lib'
+                        'location': f'{line_name}/agent'
                     })
 
         # 按修改时间排序
@@ -83,13 +67,14 @@ def get_agents_list(models_dir, lib_dir):
         }), 500
 
 
-def delete_agent_by_name(model_name, models_dir):
+def delete_agent_by_name(model_name, line_name, training_data_dir):
     """
     删除智能体（模型）
 
     Args:
         model_name: 模型名称
-        models_dir: 模型目录
+        line_name: 线路名称
+        training_data_dir: 训练数据目录
 
     Returns:
         Flask response
@@ -97,7 +82,9 @@ def delete_agent_by_name(model_name, models_dir):
     try:
         # 查找并删除模型文件
         deleted = False
-        model_file = os.path.join(models_dir, f'{model_name}.pth')
+        agent_dir = os.path.join(training_data_dir, line_name, 'agent')
+        model_file = os.path.join(agent_dir, f'{model_name}.pth')
+
         if os.path.exists(model_file):
             os.remove(model_file)
             deleted = True

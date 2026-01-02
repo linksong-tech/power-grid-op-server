@@ -13,23 +13,35 @@ import traceback
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), 'lib'))
 
 from td3_inference_service import optimize_reactive_power, batch_optimize
-from routes.td3_config import MODELS_DIR, RESULTS_DIR, get_lib_dir
+from routes.td3_config import RESULTS_DIR, TRAINING_DATA_DIR
 
 
-def find_model_path(model_path):
-    """查找模型文件路径"""
-    model_full_path = os.path.join(MODELS_DIR, model_path)
-    if not os.path.exists(model_full_path):
-        model_full_path = os.path.join(get_lib_dir(), model_path)
-        if not os.path.exists(model_full_path):
-            return None
-    return model_full_path
+def find_model_path(model_path, line_name):
+    """
+    查找模型文件路径
+
+    Args:
+        model_path: 模型文件名
+        line_name: 线路名称（必填，用于在指定线路的agent目录中查找）
+
+    Returns:
+        模型完整路径，如果未找到则返回None
+    """
+    # 只在指定线路的 TRAINING_DATA_DIR/{line_name}/agent/ 中查找
+    if not line_name:
+        return None
+
+    model_full_path = os.path.join(TRAINING_DATA_DIR, line_name, 'agent', model_path)
+    if os.path.exists(model_full_path):
+        return model_full_path
+
+    return None
 
 
 def td3_optimize():
     """
     执行TD3强化学习无功优化
-    
+
     请求体格式:
     {
         "busData": [[节点号, 有功P, 无功Q], ...],
@@ -38,6 +50,7 @@ def td3_optimize():
         "keyNodes": [节点索引1, 节点索引2, ...],
         "tunableNodes": [[节点索引, Q_min, Q_max, "节点名"], ...],
         "modelPath": "模型文件名",
+        "lineName": "线路名称（必填，用于在指定线路的agent目录中查找模型）",
         "parameters": {
             "UB": 10.38,
             "SB": 10
@@ -46,16 +59,16 @@ def td3_optimize():
     """
     try:
         data = request.get_json()
-        
+
         # 验证必需参数
-        required_fields = ['busData', 'branchData', 'voltageLimits', 'keyNodes', 'tunableNodes', 'modelPath']
+        required_fields = ['busData', 'branchData', 'voltageLimits', 'keyNodes', 'tunableNodes', 'modelPath', 'lineName']
         for field in required_fields:
             if field not in data:
                 return jsonify({
                     'status': 'error',
                     'message': f'缺少必需参数: {field}'
                 }), 400
-        
+
         # 获取参数
         bus_data = np.array(data['busData'])
         branch_data = np.array(data['branchData'])
@@ -63,14 +76,15 @@ def td3_optimize():
         key_nodes = data['keyNodes']
         tunable_nodes = [tuple(node) for node in data['tunableNodes']]
         model_path = data['modelPath']
-        
+        line_name = data['lineName']  # 必填参数
+
         # 获取物理参数
         params = data.get('parameters', {})
         ub = params.get('UB', 10.38)
         sb = params.get('SB', 10)
-        
+
         # 检查模型文件是否存在
-        model_full_path = find_model_path(model_path)
+        model_full_path = find_model_path(model_path, line_name)
         if not model_full_path:
             return jsonify({
                 'status': 'error',
@@ -125,7 +139,7 @@ def td3_optimize():
 def td3_batch_optimize():
     """
     批量执行TD3优化
-    
+
     请求体格式:
     {
         "testSamples": [
@@ -141,6 +155,7 @@ def td3_batch_optimize():
         "keyNodes": [节点索引1, 节点索引2, ...],
         "tunableNodes": [[节点索引, Q_min, Q_max, "节点名"], ...],
         "modelPath": "模型文件名",
+        "lineName": "线路名称（必填，用于在指定线路的agent目录中查找模型）",
         "parameters": {
             "SB": 10
         }
@@ -148,16 +163,16 @@ def td3_batch_optimize():
     """
     try:
         data = request.get_json()
-        
+
         # 验证必需参数
-        required_fields = ['testSamples', 'branchData', 'voltageLimits', 'keyNodes', 'tunableNodes', 'modelPath']
+        required_fields = ['testSamples', 'branchData', 'voltageLimits', 'keyNodes', 'tunableNodes', 'modelPath', 'lineName']
         for field in required_fields:
             if field not in data:
                 return jsonify({
                     'status': 'error',
                     'message': f'缺少必需参数: {field}'
                 }), 400
-        
+
         # 获取参数
         test_samples = data['testSamples']
         branch_data = np.array(data['branchData'])
@@ -165,13 +180,14 @@ def td3_batch_optimize():
         key_nodes = data['keyNodes']
         tunable_nodes = [tuple(node) for node in data['tunableNodes']]
         model_path = data['modelPath']
-        
+        line_name = data['lineName']  # 必填参数
+
         # 获取物理参数
         params = data.get('parameters', {})
         sb = params.get('SB', 10)
-        
+
         # 检查模型文件是否存在
-        model_full_path = find_model_path(model_path)
+        model_full_path = find_model_path(model_path, line_name)
         if not model_full_path:
             return jsonify({
                 'status': 'error',

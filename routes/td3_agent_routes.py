@@ -1,32 +1,27 @@
 """
 TD3智能体（模型）管理相关路由
 """
-from flask import jsonify
+from flask import jsonify, request
 import json
 import os
 from datetime import datetime
-from routes.td3_config import MODELS_DIR, get_lib_dir
+from routes.td3_config import TRAINING_DATA_DIR
 from routes.agent_management import get_agents_list, delete_agent_by_name
 
 
-def get_trained_agents():
-    """获取历史训练的智能体（模型）列表"""
-    lib_dir = get_lib_dir()
-    return get_agents_list(MODELS_DIR, lib_dir)
+def get_trained_agents(line_name):
+    """获取指定线路的历史训练智能体（模型）列表"""
+    return get_agents_list(TRAINING_DATA_DIR, line_name)
 
 
-def get_agent_detail(model_name):
+def get_agent_detail(line_name, model_name):
     """获取智能体详细信息"""
     try:
-        # 查找模型文件
-        model_file = None
-        for directory in [MODELS_DIR, get_lib_dir()]:
-            potential_path = os.path.join(directory, f'{model_name}.pth')
-            if os.path.exists(potential_path):
-                model_file = potential_path
-                break
-        
-        if not model_file:
+        # 在指定线路的agent目录中查找模型文件
+        agent_dir = os.path.join(TRAINING_DATA_DIR, line_name, 'agent')
+        model_file = os.path.join(agent_dir, f'{model_name}.pth')
+
+        if not os.path.exists(model_file):
             return jsonify({
                 'status': 'error',
                 'message': '模型文件不存在'
@@ -53,12 +48,14 @@ def get_agent_detail(model_name):
             'data': {
                 'model_name': model_name,
                 'filename': f'{model_name}.pth',
+                'line_name': line_name,
                 'size': file_stat.st_size,
                 'size_mb': round(file_stat.st_size / 1024 / 1024, 2),
                 'created_time': datetime.fromtimestamp(file_stat.st_ctime).strftime('%Y-%m-%d %H:%M:%S'),
                 'modified_time': datetime.fromtimestamp(file_stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
                 'training_history': training_history,
-                'meta_info': meta_info
+                'meta_info': meta_info,
+                'location': f'{line_name}/agent'
             }
         })
         
@@ -69,7 +66,7 @@ def get_agent_detail(model_name):
         }), 500
 
 
-def delete_agent(model_name):
+def delete_agent(line_name, model_name):
     """删除智能体（模型）"""
-    return delete_agent_by_name(model_name, MODELS_DIR)
+    return delete_agent_by_name(model_name, line_name, TRAINING_DATA_DIR)
 

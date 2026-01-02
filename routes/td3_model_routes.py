@@ -4,14 +4,13 @@ TD3模型和结果管理相关路由
 from flask import jsonify
 import json
 import os
-from routes.td3_config import MODELS_DIR, RESULTS_DIR, get_lib_dir
+from routes.td3_config import RESULTS_DIR, TRAINING_DATA_DIR
 from routes.model_management import get_models_list, get_results_list
 
 
 def get_td3_models():
     """获取可用的TD3模型列表"""
-    lib_dir = get_lib_dir()
-    return get_models_list(MODELS_DIR, lib_dir)
+    return get_models_list(TRAINING_DATA_DIR)
 
 
 def get_td3_results():
