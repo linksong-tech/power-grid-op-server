@@ -5,8 +5,8 @@ TD3服务使用示例
 演示如何使用工程化的训练和推理API
 """
 import numpy as np
-from td3_train_service import train_td3_model
-from td3_inference_service import optimize_reactive_power, batch_optimize
+from td3_train_service_numpy import train_td3_model
+from td3_inference_service_numpy import optimize_reactive_power, batch_optimize
 
 
 # ==================== 示例1: 训练TD3模型 ====================

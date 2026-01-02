@@ -12,7 +12,7 @@ import traceback
 # 添加lib目录到Python路径
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), 'lib'))
 
-from td3_train_service import train_td3_model
+from td3_train_service_numpy import train_td3_model
 from routes.td3_config import MODELS_DIR, TRAINING_DATA_DIR, training_status
 from routes.training_management import get_training_status_info, stop_training_task
 from routes.td3_data_reader import load_training_data

@@ -15,7 +15,7 @@ from typing import Optional
 # 添加lib目录到Python路径
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), 'lib'))
 
-from td3_inference_service import optimize_reactive_power, batch_optimize
+from td3_inference_service_numpy import optimize_reactive_power, batch_optimize
 from pso_op_v2 import pso_op_v2
 from routes.td3_config import RESULTS_DIR, TRAINING_DATA_DIR, batch_jobs, batch_jobs_lock
 from routes.td3_data_reader import load_test_samples
