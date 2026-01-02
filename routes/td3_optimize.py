@@ -11,7 +11,7 @@ td3_optimize_bp = Blueprint('td3_optimize', __name__)
 from .td3_optimize_routes import td3_optimize, td3_batch_optimize, get_td3_batch_status
 from .td3_model_routes import get_td3_models, get_td3_results, get_td3_result_detail, get_td3_template
 from .td3_training_routes import start_training, get_training_status, stop_training
-from .td3_sample_routes import upload_training_samples, get_training_samples, get_sample_detail
+from .td3_sample_routes import upload_training_samples, get_training_samples, get_sample_detail, get_test_samples, get_test_sample_detail_route
 from .td3_agent_routes import get_trained_agents, get_agent_detail, delete_agent
 from .td3_data_routes import upload_powerdata_archive, get_powerdata_lines, get_upload_task_status
 
@@ -29,6 +29,8 @@ td3_optimize_bp.add_url_rule('/api/td3-optimize/stop-training', 'stop_training',
 td3_optimize_bp.add_url_rule('/api/td3-optimize/upload-samples', 'upload_training_samples', upload_training_samples, methods=['POST'])
 td3_optimize_bp.add_url_rule('/api/td3-optimize/samples', 'get_training_samples', get_training_samples, methods=['GET'])
 td3_optimize_bp.add_url_rule('/api/td3-optimize/samples/<filename>', 'get_sample_detail', get_sample_detail, methods=['GET'])
+td3_optimize_bp.add_url_rule('/api/td3-optimize/test-samples/<line_name>', 'get_test_samples', get_test_samples, methods=['GET'])
+td3_optimize_bp.add_url_rule('/api/td3-optimize/test-samples/<line_name>/<filename>', 'get_test_sample_detail_route', get_test_sample_detail_route, methods=['GET'])
 td3_optimize_bp.add_url_rule('/api/td3-optimize/agents/<line_name>', 'get_trained_agents', get_trained_agents, methods=['GET'])
 td3_optimize_bp.add_url_rule('/api/td3-optimize/agents/<line_name>/<model_name>', 'get_agent_detail', get_agent_detail, methods=['GET'])
 td3_optimize_bp.add_url_rule('/api/td3-optimize/agents/<line_name>/<model_name>', 'delete_agent', delete_agent, methods=['DELETE'])
