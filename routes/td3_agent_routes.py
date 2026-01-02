@@ -19,7 +19,7 @@ def get_agent_detail(line_name, model_name):
     try:
         # 在指定线路的agent目录中查找模型文件
         agent_dir = os.path.join(TRAINING_DATA_DIR, line_name, 'agent')
-        model_file = os.path.join(agent_dir, f'{model_name}.pth')
+        model_file = os.path.join(agent_dir, f'{model_name}.npz')
 
         if not os.path.exists(model_file):
             return jsonify({
@@ -30,14 +30,14 @@ def get_agent_detail(line_name, model_name):
         file_stat = os.stat(model_file)
         
         # 读取训练历史
-        history_file = model_file.replace('.pth', '_history.json')
+        history_file = model_file.replace('.npz', '_history.json')
         training_history = None
         if os.path.exists(history_file):
             with open(history_file, 'r', encoding='utf-8') as f:
                 training_history = json.load(f)
         
         # 读取模型元信息
-        meta_file = model_file.replace('.pth', '_meta.json')
+        meta_file = model_file.replace('.npz', '_meta.json')
         meta_info = None
         if os.path.exists(meta_file):
             with open(meta_file, 'r', encoding='utf-8') as f:
@@ -47,7 +47,7 @@ def get_agent_detail(line_name, model_name):
             'status': 'success',
             'data': {
                 'model_name': model_name,
-                'filename': f'{model_name}.pth',
+                'filename': f'{model_name}.npz',
                 'line_name': line_name,
                 'size': file_stat.st_size,
                 'size_mb': round(file_stat.st_size / 1024 / 1024, 2),

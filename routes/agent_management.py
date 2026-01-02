@@ -26,12 +26,12 @@ def get_agents_list(training_data_dir, line_name):
         agent_dir = os.path.join(training_data_dir, line_name, 'agent')
         if os.path.isdir(agent_dir):
             for filename in os.listdir(agent_dir):
-                if filename.endswith('.pth'):
+                if filename.endswith('.npz'):
                     filepath = os.path.join(agent_dir, filename)
                     file_stat = os.stat(filepath)
 
                     # 尝试读取对应的训练历史文件
-                    history_file = filepath.replace('.pth', '_history.json')
+                    history_file = filepath.replace('.npz', '_history.json')
                     training_history = None
                     if os.path.exists(history_file):
                         try:
@@ -42,7 +42,7 @@ def get_agents_list(training_data_dir, line_name):
 
                     agents.append({
                         'filename': filename,
-                        'model_name': filename.replace('.pth', ''),
+                        'model_name': filename.replace('.npz', ''),
                         'line_name': line_name,
                         'size': file_stat.st_size,
                         'size_mb': round(file_stat.st_size / 1024 / 1024, 2),
@@ -83,7 +83,7 @@ def delete_agent_by_name(model_name, line_name, training_data_dir):
         # 查找并删除模型文件
         deleted = False
         agent_dir = os.path.join(training_data_dir, line_name, 'agent')
-        model_file = os.path.join(agent_dir, f'{model_name}.pth')
+        model_file = os.path.join(agent_dir, f'{model_name}.npz')
 
         if os.path.exists(model_file):
             os.remove(model_file)
@@ -91,7 +91,7 @@ def delete_agent_by_name(model_name, line_name, training_data_dir):
 
             # 删除相关文件
             for ext in ['_history.json', '_meta.json']:
-                related_file = model_file.replace('.pth', ext)
+                related_file = model_file.replace('.npz', ext)
                 if os.path.exists(related_file):
                     os.remove(related_file)
 
