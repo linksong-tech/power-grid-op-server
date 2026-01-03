@@ -57,7 +57,7 @@ class LineService:
 
         try:
             with open(json_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+                json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
             return True
         except Exception as e:
             print(f"[ERROR] 写入线路JSON失败: {e}")
@@ -65,7 +65,7 @@ class LineService:
 
     def _extract_archive(self, archive_path: str, extract_dir: str) -> bool:
         """
-        解压压缩包
+        解压压缩包，自动去掉外层目录
 
         Args:
             archive_path: 压缩包路径
@@ -77,18 +77,54 @@ class LineService:
         try:
             os.makedirs(extract_dir, exist_ok=True)
             
+            # 创建临时解压目录
+            temp_extract_dir = os.path.join(extract_dir, '_temp_extract')
+            os.makedirs(temp_extract_dir, exist_ok=True)
+            
+            # 解压到临时目录
             if archive_path.endswith('.zip'):
                 with zipfile.ZipFile(archive_path, 'r') as zip_ref:
-                    zip_ref.extractall(extract_dir)
+                    zip_ref.extractall(temp_extract_dir)
             elif archive_path.endswith(('.tar', '.tar.gz', '.tgz')):
                 with tarfile.open(archive_path, 'r:*') as tar_ref:
-                    tar_ref.extractall(extract_dir)
+                    tar_ref.extractall(temp_extract_dir)
             else:
+                shutil.rmtree(temp_extract_dir)
                 return False
+            
+            # 检查解压后的内容
+            items = os.listdir(temp_extract_dir)
+            
+            # 如果只有一个目录，则认为是外层包装目录，需要去掉
+            if len(items) == 1:
+                single_item = os.path.join(temp_extract_dir, items[0])
+                if os.path.isdir(single_item):
+                    # 将内层目录的内容移动到目标目录
+                    for item in os.listdir(single_item):
+                        src = os.path.join(single_item, item)
+                        dst = os.path.join(extract_dir, item)
+                        shutil.move(src, dst)
+                else:
+                    # 如果是单个文件，直接移动
+                    dst = os.path.join(extract_dir, items[0])
+                    shutil.move(single_item, dst)
+            else:
+                # 如果有多个文件/目录，直接移动所有内容
+                for item in items:
+                    src = os.path.join(temp_extract_dir, item)
+                    dst = os.path.join(extract_dir, item)
+                    shutil.move(src, dst)
+            
+            # 清理临时目录
+            shutil.rmtree(temp_extract_dir)
             
             return True
         except Exception as e:
             print(f"[ERROR] 解压文件失败: {e}")
+            # 清理临时目录
+            temp_extract_dir = os.path.join(extract_dir, '_temp_extract')
+            if os.path.exists(temp_extract_dir):
+                shutil.rmtree(temp_extract_dir)
             return False
 
     def create_line(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
