@@ -13,9 +13,10 @@ import traceback
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), 'lib'))
 
 from td3_train_service_numpy import train_td3_model
-from routes.td3_config import MODELS_DIR, TRAINING_DATA_DIR, training_status
+from routes.td3_config import training_status
 from routes.training_management import get_training_status_info, stop_training_task
-from routes.td3_data_reader import load_training_data
+from routes.td3_data_reader import load_training_data_from_line_id
+from lib.line_service import line_service
 
 # 模型文件名前缀
 MODEL_FILENAME_PREFIX = "M1"
@@ -27,7 +28,7 @@ def start_training():
     
     请求体格式（新版本）:
     {
-        "line_name": "C5336",  // 线路名称（必填）
+        "line_id": "uuid-string",  // 线路ID（必填）
         "parameters": {
             "max_episodes": 800,    // 最大训练轮次（可选，默认800）
             "max_steps": 3,          // 每轮最大步数（可选，默认3）
@@ -38,8 +39,10 @@ def start_training():
     
     说明：
     - 所有训练数据（busData, branchData, voltageLimits, keyNodes, tunableNodes, UB）
-      将从已上传的训练数据目录中自动读取
-    - 线路目录路径: td3_training_data/training_data/{line_name}/
+      将从线路目录中自动读取
+    - 线路目录路径: data/line_data/{line_id}/
+    - 训练样本路径: data/line_data/{line_id}/train/
+    - 模型保存路径: data/line_data/{line_id}/agent/
     - 模型保存格式: {MODEL_FILENAME_PREFIX}_MMDD_HHMMSS.pth
     """
     global training_status
@@ -55,25 +58,35 @@ def start_training():
         data = request.get_json()
         
         # 验证必需参数
-        if 'line_name' not in data:
+        if 'line_id' not in data:
             return jsonify({
                 'status': 'error',
-                'message': '缺少必需参数: line_name'
+                'message': '缺少必需参数: line_id'
             }), 400
         
-        line_name = data['line_name']
-        if not line_name or not isinstance(line_name, str):
+        line_id = data['line_id']
+        if not line_id or not isinstance(line_id, str):
             return jsonify({
                 'status': 'error',
-                'message': 'line_name 必须是有效的字符串'
+                'message': 'line_id 必须是有效的字符串'
             }), 400
+        
+        # 获取线路信息
+        line_data = line_service.get_line(line_id)
+        if not line_data:
+            return jsonify({
+                'status': 'error',
+                'message': f'线路不存在: {line_id}'
+            }), 404
+        
+        line_name = line_data['name']
         
         # 获取训练参数
         params = data.get('parameters', {})
         max_episodes = params.get('max_episodes', 800)
         max_steps = params.get('max_steps', 3)
         sb = params.get('SB', 10.0)
-        pr = params.get('pr', 1e-6)  # 潮流收敛精度，默认 1e-6
+        pr = params.get('pr', 1e-6)
         
         # 验证训练参数
         if not isinstance(max_episodes, int) or max_episodes <= 0:
@@ -89,10 +102,10 @@ def start_training():
             }), 400
         
         # 初始化训练状态
-        # 注意：先重置关键进度字段，避免前端获取到上次训练的完成状态
         training_status.clear()
         training_status.update({
             'is_training': True,
+            'line_id': line_id,
             'line_name': line_name,
             'model_name': MODEL_FILENAME_PREFIX,
             'current_episode': 0,
@@ -141,12 +154,13 @@ def start_training():
         def train_in_background():
             global training_status
             try:
-                # 加载训练数据（从文件读取）
+                # 加载训练数据（从新的线路目录读取）
                 training_status['message'] = '正在读取训练数据...'
                 print(f"\n=== 开始加载训练数据 ===")
+                print(f"线路ID: {line_id}")
                 print(f"线路名称: {line_name}")
                 
-                training_data = load_training_data(line_name, TRAINING_DATA_DIR)
+                training_data = load_training_data_from_line_id(line_id, line_name)
                 
                 # 提取数据
                 bus_data = training_data['bus_data']
@@ -167,8 +181,9 @@ def start_training():
                 
                 training_status['message'] = '训练数据加载完成，开始训练...'
 
-                # 构建模型保存路径: TRAINING_DATA_DIR/{line_name}/agent/
-                agent_dir = os.path.join(TRAINING_DATA_DIR, line_name, 'agent')
+                # 构建模型保存路径: data/line_data/{line_id}/agent/
+                line_dir = line_service._get_line_dir(line_id)
+                agent_dir = os.path.join(line_dir, 'agent')
                 os.makedirs(agent_dir, exist_ok=True)
 
                 # 生成带时间戳的模型文件名
@@ -220,6 +235,7 @@ def start_training():
             'status': 'success',
             'message': '训练任务已启动',
             'data': {
+                'line_id': line_id,
                 'line_name': line_name,
                 'model_name': MODEL_FILENAME_PREFIX,
                 'total_episodes': max_episodes

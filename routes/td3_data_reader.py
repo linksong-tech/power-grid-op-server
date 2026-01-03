@@ -203,7 +203,7 @@ def read_training_sample(line_dir: str, line_name: str) -> Tuple[np.ndarray, flo
     
     Args:
         line_dir: 线路目录路径
-        line_name: 线路名称
+        line_name: 线路名称（保留参数以兼容旧代码，实际不使用）
     
     Returns:
         (Bus矩阵数据, 基准电压UB)
@@ -216,10 +216,10 @@ def read_training_sample(line_dir: str, line_name: str) -> Tuple[np.ndarray, flo
     if not os.path.exists(train_dir):
         raise FileNotFoundError(f'训练样本目录不存在: {train_dir}')
     
-    # 获取所有训练样本文件
-    sample_files = glob.glob(os.path.join(train_dir, f'{line_name}_*.xlsx'))
+    # 获取所有训练样本文件（不再限制文件名格式）
+    sample_files = glob.glob(os.path.join(train_dir, '*.xlsx'))
     if not sample_files:
-        raise FileNotFoundError(f'未找到训练样本文件: {train_dir}/{line_name}_*.xlsx')
+        raise FileNotFoundError(f'未找到训练样本文件: {train_dir}/*.xlsx')
     
     # 使用第一个文件
     file_path = sample_files[0]
@@ -244,6 +244,10 @@ def read_test_samples(line_dir: str, line_name: str) -> List[Dict]:
     - sheet=slack: 基准电压 UB
     - sheet=date: 时间（可选，缺失则从文件名推断）
 
+    Args:
+        line_dir: 线路目录路径
+        line_name: 线路名称（保留参数以兼容旧代码，实际不使用）
+
     Returns:
         List[Dict]: 每个样本为:
           {
@@ -256,9 +260,10 @@ def read_test_samples(line_dir: str, line_name: str) -> List[Dict]:
     if not os.path.exists(test_dir):
         raise FileNotFoundError(f'测试样本目录不存在: {test_dir}')
 
-    sample_files = sorted(glob.glob(os.path.join(test_dir, f'{line_name}_*.xlsx')))
+    # 获取所有测试样本文件（不再限制文件名格式）
+    sample_files = sorted(glob.glob(os.path.join(test_dir, '*.xlsx')))
     if not sample_files:
-        raise FileNotFoundError(f'未找到测试样本文件: {test_dir}/{line_name}_*.xlsx')
+        raise FileNotFoundError(f'未找到测试样本文件: {test_dir}/*.xlsx')
 
     samples: List[Dict] = []
     for file_path in sample_files:
@@ -283,8 +288,8 @@ def read_test_samples(line_dir: str, line_name: str) -> List[Dict]:
 
             if not sample_time or sample_time == 'nan':
                 stem = Path(file_path).stem
-                # e.g. C5336_YYYYMMDDHHMM
-                sample_time = stem.replace(f"{line_name}_", "")
+                # 使用文件名作为时间标识
+                sample_time = stem
 
             samples.append({
                 'time': sample_time,
@@ -338,6 +343,94 @@ def load_training_data(line_name: str, training_data_dir: str) -> Dict:
     
     # 读取并计算可调无功节点（需要bus_data）
     tunable_q_nodes = read_tunable_q_nodes(line_dir, line_name, bus_data)
+    
+    return {
+        'bus_data': bus_data,
+        'branch_data': branch_data,
+        'voltage_limits': (voltage_lower, voltage_upper),
+        'key_nodes': key_nodes,
+        'tunable_q_nodes': tunable_q_nodes,
+        'ub': ub
+    }
+
+
+def load_training_data_from_line_id(line_id: str, line_name: str) -> Dict:
+    """
+    从新的线路目录结构加载训练数据（从 line_info.json 读取配置）
+    
+    Args:
+        line_id: 线路ID（UUID）
+        line_name: 线路名称（用于匹配文件名）
+    
+    Returns:
+        包含所有训练数据的字典
+    
+    Raises:
+        FileNotFoundError: 线路目录或必需文件不存在
+        ValueError: 文件格式错误或数据缺失
+    """
+    # 导入 line_service
+    import sys
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'lib'))
+    from line_service import line_service
+    
+    # 获取线路信息
+    line_data = line_service.get_line(line_id)
+    if not line_data:
+        raise FileNotFoundError(f'线路不存在: {line_id}')
+    
+    # 检查必需的配置数据
+    if not line_data.get('lineParamsData'):
+        raise ValueError('线路缺少支路数据（lineParamsData），请先在线路建模中上传')
+    
+    if not line_data.get('voltageLimitData'):
+        raise ValueError('线路缺少电压上下限数据（voltageLimitData），请先在线路建模中上传')
+    
+    if not line_data.get('keyNodesData'):
+        raise ValueError('线路缺少关键节点数据（keyNodesData），请先在线路建模中上传')
+    
+    if not line_data.get('adjustablePvData'):
+        raise ValueError('线路缺少可调光伏数据（adjustablePvData），请先在线路建模中上传')
+    
+    # 获取线路目录
+    line_data_dir = line_service._get_line_dir(line_id)
+    
+    # 读取训练样本（Bus数据和UB）
+    bus_data, ub = read_training_sample(line_data_dir, line_name)
+    
+    # 从 line_info.json 读取配置数据
+    # 1. 支路数据 lineParamsData: [[线路号, 首节点, 末节点, 电阻, 电抗], ...]
+    branch_data = np.array(line_data['lineParamsData'], dtype=float)
+    
+    # 2. 电压上下限 voltageLimitData: [下限, 上限]
+    voltage_limit_data = line_data['voltageLimitData']
+    if not isinstance(voltage_limit_data, list) or len(voltage_limit_data) != 2:
+        raise ValueError('电压上下限数据格式错误，应为 [下限, 上限]')
+    voltage_lower = float(voltage_limit_data[0])
+    voltage_upper = float(voltage_limit_data[1])
+    
+    # 3. 关键节点 keyNodesData: [节点号1, 节点号2, ...]（1-based，需要转换为0-based索引）
+    key_nodes_data = line_data['keyNodesData']
+    key_nodes = [int(node) - 1 for node in key_nodes_data]  # 转换为0-based索引
+    
+    # 4. 可调光伏节点 adjustablePvData: [[节点号, 容量, 名称], ...]
+    adjustable_pv_data = line_data['adjustablePvData']
+    tunable_q_nodes = []
+    for pv in adjustable_pv_data:
+        node_num = int(pv[0])  # 节点号（1-based）
+        capacity = float(pv[1])  # 容量
+        node_name = str(pv[2]) if len(pv) > 2 else f"节点{node_num}"
+        
+        # 计算可调无功上下限
+        node_index = node_num - 1  # 转换为0-based索引
+        if node_index >= bus_data.shape[0]:
+            raise ValueError(f'节点号 {node_num} 超出Bus数据范围')
+        
+        p_current = bus_data[node_index, 1]  # Bus矩阵中该节点的有功值
+        q_max = np.sqrt(max(0, capacity**2 - p_current**2))  # 无功上限
+        q_min = -q_max  # 无功下限
+        
+        tunable_q_nodes.append((node_index, q_min, q_max, node_name))
     
     return {
         'bus_data': bus_data,

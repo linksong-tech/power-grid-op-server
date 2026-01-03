@@ -5,20 +5,19 @@ from flask import jsonify, request
 import json
 import os
 from datetime import datetime
-from routes.td3_config import TRAINING_DATA_DIR
 from routes.agent_management import get_agents_list, delete_agent_by_name
 
 
-def get_trained_agents(line_name):
+def get_trained_agents(line_id):
     """获取指定线路的历史训练智能体（模型）列表"""
-    return get_agents_list(TRAINING_DATA_DIR, line_name)
+    return get_agents_list(line_id)
 
 
-def get_agent_detail(line_name, model_name):
+def get_agent_detail(line_id, model_name):
     """获取智能体详细信息"""
     try:
         # 在指定线路的agent目录中查找模型文件
-        agent_dir = os.path.join(TRAINING_DATA_DIR, line_name, 'agent')
+        agent_dir = os.path.join('data', 'line_data', line_id, 'agent')
         model_file = os.path.join(agent_dir, f'{model_name}.npz')
 
         if not os.path.exists(model_file):
@@ -48,14 +47,14 @@ def get_agent_detail(line_name, model_name):
             'data': {
                 'model_name': model_name,
                 'filename': f'{model_name}.npz',
-                'line_name': line_name,
+                'line_id': line_id,
                 'size': file_stat.st_size,
                 'size_mb': round(file_stat.st_size / 1024 / 1024, 2),
                 'created_time': datetime.fromtimestamp(file_stat.st_ctime).strftime('%Y-%m-%d %H:%M:%S'),
                 'modified_time': datetime.fromtimestamp(file_stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
                 'training_history': training_history,
                 'meta_info': meta_info,
-                'location': f'{line_name}/agent'
+                'location': f'line_data/{line_id}/agent'
             }
         })
         
@@ -66,7 +65,6 @@ def get_agent_detail(line_name, model_name):
         }), 500
 
 
-def delete_agent(line_name, model_name):
+def delete_agent(line_id, model_name):
     """删除智能体（模型）"""
-    return delete_agent_by_name(model_name, line_name, TRAINING_DATA_DIR)
-
+    return delete_agent_by_name(model_name, line_id)

@@ -7,14 +7,13 @@ from datetime import datetime
 from flask import jsonify
 
 
-def get_agents_list(training_data_dir, line_name):
+def get_agents_list(line_id):
     """
     获取指定线路的历史训练智能体（模型）列表
     包含模型的详细信息和训练历史
 
     Args:
-        training_data_dir: 训练数据目录
-        line_name: 线路名称
+        line_id: 线路ID
 
     Returns:
         Flask response
@@ -23,7 +22,7 @@ def get_agents_list(training_data_dir, line_name):
         agents = []
 
         # 扫描指定线路的agent目录
-        agent_dir = os.path.join(training_data_dir, line_name, 'agent')
+        agent_dir = os.path.join('data', 'line_data', line_id, 'agent')
         if os.path.isdir(agent_dir):
             for filename in os.listdir(agent_dir):
                 if filename.endswith('.npz'):
@@ -43,13 +42,13 @@ def get_agents_list(training_data_dir, line_name):
                     agents.append({
                         'filename': filename,
                         'model_name': filename.replace('.npz', ''),
-                        'line_name': line_name,
+                        'line_id': line_id,
                         'size': file_stat.st_size,
                         'size_mb': round(file_stat.st_size / 1024 / 1024, 2),
                         'created_time': datetime.fromtimestamp(file_stat.st_ctime).strftime('%Y-%m-%d %H:%M:%S'),
                         'modified_time': datetime.fromtimestamp(file_stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
                         'training_history': training_history,
-                        'location': f'{line_name}/agent'
+                        'location': f'line_data/{line_id}/agent'
                     })
 
         # 按修改时间排序
@@ -67,14 +66,13 @@ def get_agents_list(training_data_dir, line_name):
         }), 500
 
 
-def delete_agent_by_name(model_name, line_name, training_data_dir):
+def delete_agent_by_name(model_name, line_id):
     """
     删除智能体（模型）
 
     Args:
         model_name: 模型名称
-        line_name: 线路名称
-        training_data_dir: 训练数据目录
+        line_id: 线路ID
 
     Returns:
         Flask response
@@ -82,7 +80,7 @@ def delete_agent_by_name(model_name, line_name, training_data_dir):
     try:
         # 查找并删除模型文件
         deleted = False
-        agent_dir = os.path.join(training_data_dir, line_name, 'agent')
+        agent_dir = os.path.join('data', 'line_data', line_id, 'agent')
         model_file = os.path.join(agent_dir, f'{model_name}.npz')
 
         if os.path.exists(model_file):
@@ -111,4 +109,3 @@ def delete_agent_by_name(model_name, line_name, training_data_dir):
             'status': 'error',
             'message': f'删除智能体失败: {str(e)}'
         }), 500
-
