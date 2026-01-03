@@ -8,6 +8,7 @@ import uuid
 import shutil
 import zipfile
 import tarfile
+import pandas as pd
 from datetime import datetime
 from typing import Optional, Dict, List, Any
 
@@ -368,6 +369,192 @@ class LineService:
         except Exception as e:
             print(f"[ERROR] 上传测试样本失败: {e}")
             return False
+
+    def get_training_samples(self, line_id: str) -> List[Dict[str, Any]]:
+        """
+        获取训练样本列表
+
+        Args:
+            line_id: 线路ID
+
+        Returns:
+            训练样本列表
+        """
+        try:
+            line_dir = self._get_line_dir(line_id)
+            train_dir = os.path.join(line_dir, 'train')
+
+            if not os.path.exists(train_dir):
+                return []
+
+            samples = []
+            for filename in os.listdir(train_dir):
+                if filename.endswith(('.xlsx', '.xls')):
+                    filepath = os.path.join(train_dir, filename)
+                    file_stat = os.stat(filepath)
+
+                    samples.append({
+                        'filename': filename,
+                        'name': os.path.splitext(filename)[0],
+                        'size': file_stat.st_size,
+                        'modifiedTime': file_stat.st_mtime
+                    })
+
+            samples.sort(key=lambda x: x.get('modifiedTime', 0), reverse=True)
+            return samples
+
+        except Exception as e:
+            print(f"[ERROR] 获取训练样本列表失败: {e}")
+            return []
+
+    def get_test_samples(self, line_id: str) -> List[Dict[str, Any]]:
+        """
+        获取测试样本列表
+
+        Args:
+            line_id: 线路ID
+
+        Returns:
+            测试样本列表
+        """
+        try:
+            line_dir = self._get_line_dir(line_id)
+            test_dir = os.path.join(line_dir, 'test')
+
+            if not os.path.exists(test_dir):
+                return []
+
+            samples = []
+            for filename in os.listdir(test_dir):
+                if filename.endswith(('.xlsx', '.xls')):
+                    filepath = os.path.join(test_dir, filename)
+                    file_stat = os.stat(filepath)
+
+                    samples.append({
+                        'filename': filename,
+                        'name': os.path.splitext(filename)[0],
+                        'size': file_stat.st_size,
+                        'modifiedTime': file_stat.st_mtime
+                    })
+
+            samples.sort(key=lambda x: x.get('modifiedTime', 0), reverse=True)
+            return samples
+
+        except Exception as e:
+            print(f"[ERROR] 获取测试样本列表失败: {e}")
+            return []
+
+    def get_training_sample_detail(self, line_id: str, filename: str) -> Optional[Dict[str, Any]]:
+        """
+        获取训练样本详情
+
+        Args:
+            line_id: 线路ID
+            filename: Excel 文件名
+
+        Returns:
+            样本详情数据，失败返回None
+        """
+        try:
+            line_dir = self._get_line_dir(line_id)
+            train_dir = os.path.join(line_dir, 'train')
+            filepath = os.path.join(train_dir, filename)
+
+            if not os.path.exists(filepath):
+                return None
+
+            excel_file = pd.ExcelFile(filepath)
+
+            required_sheets = ['date', 'slack', 'bus']
+            missing_sheets = [sheet for sheet in required_sheets if sheet not in excel_file.sheet_names]
+            if missing_sheets:
+                print(f"[ERROR] Excel 文件缺少必需的 sheet: {', '.join(missing_sheets)}")
+                return None
+
+            date_df = pd.read_excel(filepath, sheet_name='date', header=None, skiprows=1)
+            history_oc_date = str(date_df.iloc[0, 0]) if not date_df.empty else ''
+
+            slack_df = pd.read_excel(filepath, sheet_name='slack', header=None, skiprows=1)
+            bus_voltage = str(slack_df.iloc[0, 0]) if not slack_df.empty else ''
+
+            bus_df = pd.read_excel(filepath, sheet_name='bus', header=None, skiprows=1)
+
+            history_oc_data = []
+            for _, row in bus_df.iterrows():
+                history_oc_data.append([
+                    str(row[0]),
+                    str(row[1]),
+                    str(row[2])
+                ])
+
+            return {
+                'filename': filename,
+                'historyOcDate': history_oc_date,
+                'busVoltage': bus_voltage,
+                'historyOcData': history_oc_data
+            }
+
+        except Exception as e:
+            print(f"[ERROR] 获取训练样本详情失败: {e}")
+            import traceback
+            print(traceback.format_exc())
+            return None
+
+    def get_test_sample_detail(self, line_id: str, filename: str) -> Optional[Dict[str, Any]]:
+        """
+        获取测试样本详情
+
+        Args:
+            line_id: 线路ID
+            filename: Excel 文件名
+
+        Returns:
+            样本详情数据，失败返回None
+        """
+        try:
+            line_dir = self._get_line_dir(line_id)
+            test_dir = os.path.join(line_dir, 'test')
+            filepath = os.path.join(test_dir, filename)
+
+            if not os.path.exists(filepath):
+                return None
+
+            excel_file = pd.ExcelFile(filepath)
+
+            required_sheets = ['date', 'slack', 'bus']
+            missing_sheets = [sheet for sheet in required_sheets if sheet not in excel_file.sheet_names]
+            if missing_sheets:
+                print(f"[ERROR] Excel 文件缺少必需的 sheet: {', '.join(missing_sheets)}")
+                return None
+
+            date_df = pd.read_excel(filepath, sheet_name='date', header=None, skiprows=1)
+            history_oc_date = str(date_df.iloc[0, 0]) if not date_df.empty else ''
+
+            slack_df = pd.read_excel(filepath, sheet_name='slack', header=None, skiprows=1)
+            bus_voltage = str(slack_df.iloc[0, 0]) if not slack_df.empty else ''
+
+            bus_df = pd.read_excel(filepath, sheet_name='bus', header=None, skiprows=1)
+
+            history_oc_data = []
+            for _, row in bus_df.iterrows():
+                history_oc_data.append([
+                    str(row[0]),
+                    str(row[1]),
+                    str(row[2])
+                ])
+
+            return {
+                'filename': filename,
+                'historyOcDate': history_oc_date,
+                'busVoltage': bus_voltage,
+                'historyOcData': history_oc_data
+            }
+
+        except Exception as e:
+            print(f"[ERROR] 获取测试样本详情失败: {e}")
+            import traceback
+            print(traceback.format_exc())
+            return None
 
 
 # 全局线路服务实例

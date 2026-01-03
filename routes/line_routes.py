@@ -202,3 +202,51 @@ def upload_test_sample(line_id):
         
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'上传失败: {str(e)}'}), 500
+
+
+@line_bp.route('/api/lines/<line_id>/training-samples', methods=['GET'])
+def get_training_samples(line_id):
+    """获取训练样本列表"""
+    try:
+        samples = line_service.get_training_samples(line_id)
+        return jsonify({'status': 'success', 'data': samples})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'获取训练样本列表失败: {str(e)}'}), 500
+
+
+@line_bp.route('/api/lines/<line_id>/test-samples', methods=['GET'])
+def get_test_samples(line_id):
+    """获取测试样本列表"""
+    try:
+        samples = line_service.get_test_samples(line_id)
+        return jsonify({'status': 'success', 'data': samples})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'获取测试样本列表失败: {str(e)}'}), 500
+
+
+@line_bp.route('/api/lines/<line_id>/training-samples/<filename>', methods=['GET'])
+def get_training_sample_detail(line_id, filename):
+    """获取训练样本详情"""
+    try:
+        detail = line_service.get_training_sample_detail(line_id, filename)
+        
+        if not detail:
+            return jsonify({'status': 'error', 'message': '训练样本不存在或读取失败'}), 404
+        
+        return jsonify({'status': 'success', 'data': detail})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'获取训练样本详情失败: {str(e)}'}), 500
+
+
+@line_bp.route('/api/lines/<line_id>/test-samples/<filename>', methods=['GET'])
+def get_test_sample_detail(line_id, filename):
+    """获取测试样本详情"""
+    try:
+        detail = line_service.get_test_sample_detail(line_id, filename)
+        
+        if not detail:
+            return jsonify({'status': 'error', 'message': '测试样本不存在或读取失败'}), 404
+        
+        return jsonify({'status': 'success', 'data': detail})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'获取测试样本详情失败: {str(e)}'}), 500
