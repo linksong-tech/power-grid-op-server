@@ -74,7 +74,7 @@ class UploadTaskManager:
         with self.lock:
             return self.tasks.get(task_id)
 
-    def process_upload(self, task_id, archive_path, training_data_dir):
+    def process_upload(self, task_id, archive_path, training_data_dir, line_name=None):
         """
         后台处理上传的文件
 
@@ -82,6 +82,7 @@ class UploadTaskManager:
             task_id: 任务ID
             archive_path: 压缩包路径
             training_data_dir: 训练数据目录
+            line_name: 可选的线路名称，如果指定则直接保存到该线路目录
         """
         temp_dir = None
 
@@ -109,28 +110,42 @@ class UploadTaskManager:
 
             self.update_task(task_id, progress=40, message='正在验证目录结构...')
 
-            # 验证目录结构
-            from .powerdata_upload import validate_powerdata_structure
-            is_valid, error_msg, line_dirs, actual_root = validate_powerdata_structure(extract_dir)
-
-            if not is_valid:
-                raise Exception(f'目录结构验证失败: {error_msg}')
-
-            self.update_task(task_id, progress=60, message='正在移动文件...')
-
-            # 移动线路数据
-            moved_lines = []
-            for line_dir in line_dirs:
-                src_path = os.path.join(actual_root, line_dir)
-                dst_path = os.path.join(training_data_dir, line_dir)
+            # 如果指定了线路名称，直接保存到该线路目录
+            if line_name:
+                # 直接将解压的内容移动到指定线路目录
+                dst_path = os.path.join(training_data_dir, line_name)
 
                 # 如果目标目录已存在，先删除
                 if os.path.exists(dst_path):
                     shutil.rmtree(dst_path)
 
-                # 移动目录
-                shutil.move(src_path, dst_path)
-                moved_lines.append(line_dir)
+                # 移动整个解压目录到目标位置
+                shutil.move(extract_dir, dst_path)
+
+                moved_lines = [line_name]
+            else:
+                # 验证目录结构
+                from .powerdata_upload import validate_powerdata_structure
+                is_valid, error_msg, line_dirs, actual_root = validate_powerdata_structure(extract_dir)
+
+                if not is_valid:
+                    raise Exception(f'目录结构验证失败: {error_msg}')
+
+                self.update_task(task_id, progress=60, message='正在移动文件...')
+
+                # 移动线路数据
+                moved_lines = []
+                for line_dir in line_dirs:
+                    src_path = os.path.join(actual_root, line_dir)
+                    dst_path = os.path.join(training_data_dir, line_dir)
+
+                    # 如果目标目录已存在，先删除
+                    if os.path.exists(dst_path):
+                        shutil.rmtree(dst_path)
+
+                    # 移动目录
+                    shutil.move(src_path, dst_path)
+                    moved_lines.append(line_dir)
 
             self.update_task(task_id, progress=90, message='正在清理临时文件...')
 

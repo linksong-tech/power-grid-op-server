@@ -122,6 +122,10 @@ def handle_upload_powerdata(training_data_dir):
     处理训练数据压缩包上传（异步模式）
     文件上传完成后立即返回任务ID，后台处理解压和验证
 
+    支持两种模式：
+    1. 不指定line_name：上传包含多个线路的压缩包，自动解析所有线路
+    2. 指定line_name：上传单个线路的数据，直接保存到指定线路目录
+
     Args:
         training_data_dir: 训练数据保存目录
 
@@ -143,6 +147,9 @@ def handle_upload_powerdata(training_data_dir):
                 'status': 'error',
                 'message': '未选择文件'
             }), 400
+
+        # 获取可选的线路名称参数
+        line_name = request.form.get('line_name', None)
 
         # 验证文件类型
         filename = secure_filename(file.filename)
@@ -175,7 +182,7 @@ def handle_upload_powerdata(training_data_dir):
         # 启动后台线程处理
         thread = threading.Thread(
             target=upload_task_manager.process_upload,
-            args=(task_id, archive_path, training_data_dir)
+            args=(task_id, archive_path, training_data_dir, line_name)
         )
         thread.daemon = True
         thread.start()
