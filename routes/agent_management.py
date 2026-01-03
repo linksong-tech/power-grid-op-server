@@ -4,7 +4,14 @@
 import os
 import json
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from flask import jsonify
+
+
+def get_timezone():
+    """获取时区配置，默认为 Asia/Shanghai"""
+    tz_name = os.environ.get('TZ', 'Asia/Shanghai')
+    return ZoneInfo(tz_name)
 
 
 def get_agents_list(line_id):
@@ -39,14 +46,19 @@ def get_agents_list(line_id):
                         except:
                             pass
 
+                    # 使用环境变量配置的时区
+                    tz = get_timezone()
+                    created_time = datetime.fromtimestamp(file_stat.st_ctime, tz=tz).strftime('%Y-%m-%d %H:%M:%S')
+                    modified_time = datetime.fromtimestamp(file_stat.st_mtime, tz=tz).strftime('%Y-%m-%d %H:%M:%S')
+                    
                     agents.append({
                         'filename': filename,
                         'model_name': filename.replace('.npz', ''),
                         'line_id': line_id,
                         'size': file_stat.st_size,
                         'size_mb': round(file_stat.st_size / 1024 / 1024, 2),
-                        'created_time': datetime.fromtimestamp(file_stat.st_ctime).strftime('%Y-%m-%d %H:%M:%S'),
-                        'modified_time': datetime.fromtimestamp(file_stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
+                        'created_time': created_time,
+                        'modified_time': modified_time,
                         'training_history': training_history,
                         'location': f'line_data/{line_id}/agent'
                     })
