@@ -677,10 +677,13 @@ def td3_batch_optimize():
                     })
                     _append_job_log(job_id, "评估完成")
 
-                    # 保存结果文件
-                    result_file = os.path.join(RESULTS_DIR, f'td3_perf_eval_{datetime.now().strftime("%Y%m%d_%H%M%S")}_{job_id}.json')
+                    # 保存结果文件到线路目录的 perf_eval 子目录
+                    line_dir = line_service._get_line_dir(line_id)
+                    perf_eval_dir = os.path.join(line_dir, 'perf_eval')
+                    os.makedirs(perf_eval_dir, exist_ok=True)
+                    result_file = os.path.join(perf_eval_dir, f'perf_eval_{datetime.now().strftime("%Y%m%d_%H%M%S")}_{job_id}.json')
                     with open(result_file, 'w', encoding='utf-8') as f:
-                        json.dump(result, f, ensure_ascii=False, indent=2)
+                        json.dump(result, f, ensure_ascii=False, separators=(',', ':'))
                 except Exception as e:
                     _update_job(job_id, {
                         "status": "failed",
@@ -712,10 +715,13 @@ def td3_batch_optimize():
             custom_thresholds=custom_thresholds,
         )
 
-        # 保存结果
-        result_file = os.path.join(RESULTS_DIR, f'td3_perf_eval_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json')
+        # 保存结果到线路目录的 perf_eval 子目录
+        line_dir = line_service._get_line_dir(line_id)
+        perf_eval_dir = os.path.join(line_dir, 'perf_eval')
+        os.makedirs(perf_eval_dir, exist_ok=True)
+        result_file = os.path.join(perf_eval_dir, f'perf_eval_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json')
         with open(result_file, 'w', encoding='utf-8') as f:
-            json.dump(result, f, ensure_ascii=False, indent=2)
+            json.dump(result, f, ensure_ascii=False, separators=(',', ':'))
 
         return jsonify({'status': 'success', 'data': result})
         
