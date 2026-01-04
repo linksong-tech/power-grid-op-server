@@ -18,7 +18,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), 'lib
 from td3_inference_service_numpy import optimize_reactive_power, batch_optimize
 from pso_op_v2 import pso_op_v2
 from routes.td3_config import RESULTS_DIR, TRAINING_DATA_DIR, batch_jobs, batch_jobs_lock
-from routes.td3_data_reader import load_test_samples
+from routes.td3_data_reader import load_test_samples, read_test_samples
+from lib.line_service import line_service
 
 
 def find_model_path(model_path, line_name):
@@ -41,6 +42,50 @@ def find_model_path(model_path, line_name):
         return model_full_path
 
     return None
+
+
+def find_model_path_by_line_id(model_path, line_id):
+    """
+    通过线路ID查找模型文件路径（从 /api/td3-optimize/train 接口训练完成后的模型文件）
+
+    Args:
+        model_path: 模型文件名
+        line_id: 线路ID（UUID）
+
+    Returns:
+        模型完整路径，如果未找到则返回None
+    """
+    if not line_id:
+        return None
+
+    # 从 line_service 获取线路目录
+    line_dir = line_service._get_line_dir(line_id)
+    model_full_path = os.path.join(line_dir, 'agent', model_path)
+
+    if os.path.exists(model_full_path):
+        return model_full_path
+
+    return None
+
+
+def load_test_samples_by_line_id(line_id):
+    """
+    通过线路ID加载测试样本（从 /api/lines/<line_id>/test-sample 接口上传的测试样本目录）
+
+    Args:
+        line_id: 线路ID（UUID）
+
+    Returns:
+        测试样本列表
+    """
+    if not line_id:
+        raise ValueError('line_id 不能为空')
+
+    # 从 line_service 获取线路目录
+    line_dir = line_service._get_line_dir(line_id)
+
+    # 使用 read_test_samples 读取测试样本（line_name 参数在此函数中未使用）
+    return read_test_samples(line_dir, None)
 
 
 PERFORMANCE_THRESHOLDS = {
@@ -496,7 +541,7 @@ def td3_batch_optimize():
         "keyNodes": [节点索引1, 节点索引2, ...],
         "tunableNodes": [[节点索引, Q_min, Q_max, "节点名"], ...],
         "modelPath": "模型文件名",
-        "lineName": "线路名称（必填，用于在指定线路的agent目录中查找模型）",
+        "lineId": "线路ID（必填，用于从 /api/lines/<line_id>/test-sample 上传的测试样本和 /api/td3-optimize/train 训练的模型）",
         "parameters": {
             "SB": 10
         }
@@ -508,17 +553,17 @@ def td3_batch_optimize():
         is_async = bool(data.get("async", False))
 
         # 验证必需参数（testSamples 可由后端从已上传数据中读取）
-        required_fields = ['branchData', 'voltageLimits', 'keyNodes', 'tunableNodes', 'modelPath', 'lineName']
+        required_fields = ['branchData', 'voltageLimits', 'keyNodes', 'tunableNodes', 'modelPath', 'lineId']
         for field in required_fields:
             if field not in data:
                 return jsonify({'status': 'error', 'message': f'缺少必需参数: {field}'}), 400
 
         # 获取参数
-        line_name = data['lineName']  # 必填参数
+        line_id = data['lineId']  # 必填参数
         test_samples = data.get('testSamples')
         if not test_samples:
-            # 从 TRAINING_DATA_DIR/{line_name}/test 读取（由 upload-powerdata 上传）
-            test_samples = load_test_samples(line_name, TRAINING_DATA_DIR)
+            # 从 /api/lines/<line_id>/test-sample 接口上传的测试样本目录读取
+            test_samples = load_test_samples_by_line_id(line_id)
         branch_data = np.array(data['branchData'])
         voltage_limits = tuple(data['voltageLimits'])
         key_nodes = data['keyNodes']
@@ -530,8 +575,8 @@ def td3_batch_optimize():
         sb = float(params.get('SB', 10))
         pso_params = params.get('psoParameters', {}) or {}
 
-        # 检查模型文件是否存在
-        model_full_path = find_model_path(model_path, line_name)
+        # 检查模型文件是否存在（从 /api/td3-optimize/train 接口训练完成后的模型文件）
+        model_full_path = find_model_path_by_line_id(model_path, line_id)
         if not model_full_path:
             return jsonify({
                 'status': 'error',
