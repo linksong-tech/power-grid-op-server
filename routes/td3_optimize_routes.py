@@ -88,19 +88,25 @@ def load_test_samples_by_line_id(line_id):
     return read_test_samples(line_dir, None)
 
 
+# 全局性能阈值配置（可通过API动态修改）
 PERFORMANCE_THRESHOLDS = {
-    "优秀": {"voltage_error": 0.5, "loss_error": 3.0},
-    "良好": {"voltage_error": 1.0, "loss_error": 4.0},
-    "合格": {"voltage_error": 2.0, "loss_error": 5.0},
-    "不合格": {"voltage_error": float("inf"), "loss_error": float("inf")},
+    "excellent": {"voltage_error": 0.5, "loss_error": 3.0},
+    "good": {"voltage_error": 1.0, "loss_error": 4.0},
+    "qualified": {"voltage_error": 2.0, "loss_error": 5.0},
+    "unqualified": {"voltage_error": float("inf"), "loss_error": float("inf")},
 }
+
+# 用于线程安全的阈值访问
+import threading
+thresholds_lock = threading.Lock()
 
 
 def _compute_rating(voltage_error: float, loss_error: float) -> str:
-    for label, threshold in PERFORMANCE_THRESHOLDS.items():
-        if voltage_error < threshold["voltage_error"] and loss_error < threshold["loss_error"]:
-            return label
-    return "不合格"
+    with thresholds_lock:
+        for label, threshold in PERFORMANCE_THRESHOLDS.items():
+            if voltage_error < threshold["voltage_error"] and loss_error < threshold["loss_error"]:
+                return label
+    return "unqualified"
 
 
 def _append_job_log(job_id: str, message: str):
@@ -171,6 +177,7 @@ def _run_perf_evaluation(
     pso_params: Optional[dict] = None,
     progress_callback=None,
     update_callback=None,
+    custom_thresholds: Optional[dict] = None,
 ):
     """
     返回：
@@ -184,6 +191,19 @@ def _run_perf_evaluation(
     }
     """
     pso_params = pso_params or {}
+
+    # 使用自定义阈值或全局阈值
+    if custom_thresholds:
+        thresholds = custom_thresholds
+    else:
+        with thresholds_lock:
+            thresholds = PERFORMANCE_THRESHOLDS.copy()
+
+    def compute_rating(voltage_error: float, loss_error: float) -> str:
+        for label, threshold in thresholds.items():
+            if voltage_error < threshold["voltage_error"] and loss_error < threshold["loss_error"]:
+                return label
+        return "unqualified"
 
     num_particles = int(pso_params.get("num_particles", 30))
     max_iter = int(pso_params.get("max_iter", 50))
@@ -243,7 +263,7 @@ def _run_perf_evaluation(
                 "avg_pso_relative_reduction": 0.0,
                 "avg_voltage_average_error": float("inf"),
                 "avg_loss_error": float("inf"),
-                "overall_rating": "不合格",
+                "overall_rating": "unqualified",
                 "node_summary": build_node_summary(),
             }
 
@@ -255,7 +275,7 @@ def _run_perf_evaluation(
 
         avg_pso_2 = (sum_pso / pso_ok_count) if pso_ok_count else 0.0
         avg_pso_red2 = (sum_pso_red / ok_count) if ok_count else 0.0
-        overall_rating = _compute_rating(avg_v_err2, avg_l_err2)
+        overall_rating = compute_rating(avg_v_err2, avg_l_err2)
 
         return {
             "avg_pre_optimization_loss": round(float(avg_pre), 4),
@@ -340,11 +360,11 @@ def _run_perf_evaluation(
                 pso_voltages = np.array(pso_result["final_voltages"], dtype=float)
                 voltage_error = float(np.mean(np.abs(rl_voltages - pso_voltages)) / ub * 100.0) if ub else 0.0
                 loss_error = float(abs(rl_loss - pso_loss))
-                rating = _compute_rating(voltage_error, loss_error)
+                rating = compute_rating(voltage_error, loss_error)
             else:
                 voltage_error = float("inf")
                 loss_error = float("inf")
-                rating = "不合格"
+                rating = "unqualified"
 
             # 节点无功值汇总（平均）
             for idx, q in enumerate(td3_result.get("optimized_q_values", [])):
@@ -575,6 +595,9 @@ def td3_batch_optimize():
         sb = float(params.get('SB', 10))
         pso_params = params.get('psoParameters', {}) or {}
 
+        # 获取性能阈值（如果前端传入）
+        custom_thresholds = data.get('performanceThresholds')
+
         # 检查模型文件是否存在（从 /api/td3-optimize/train 接口训练完成后的模型文件）
         model_full_path = find_model_path_by_line_id(model_path, line_id)
         if not model_full_path:
@@ -609,7 +632,7 @@ def td3_batch_optimize():
                             "avg_pso_relative_reduction": 0.0,
                             "avg_voltage_average_error": float("inf"),
                             "avg_loss_error": float("inf"),
-                            "overall_rating": "不合格",
+                            "overall_rating": "unqualified",
                             "node_summary": [],
                         },
                     },
@@ -644,6 +667,7 @@ def td3_batch_optimize():
                         pso_params=pso_params,
                         progress_callback=progress_callback,
                         update_callback=lambda partial: _update_job(job_id, {"result": partial}),
+                        custom_thresholds=custom_thresholds,
                     )
                     _update_job(job_id, {
                         "status": "completed",
@@ -685,6 +709,7 @@ def td3_batch_optimize():
             model_full_path=model_full_path,
             sb=sb,
             pso_params=pso_params,
+            custom_thresholds=custom_thresholds,
         )
 
         # 保存结果
@@ -709,3 +734,43 @@ def get_td3_batch_status(job_id: str):
         if not job:
             return jsonify({"status": "error", "message": "任务不存在"}), 404
         return jsonify({"status": "success", "data": job})
+
+
+def get_performance_thresholds():
+    """获取当前性能阈值配置"""
+    with thresholds_lock:
+        return jsonify(PERFORMANCE_THRESHOLDS)
+
+
+def update_performance_thresholds():
+    """更新性能阈值配置"""
+    try:
+        data = request.get_json()
+
+        # 验证数据格式
+        required_levels = ["excellent", "good", "qualified", "unqualified"]
+        for level in required_levels:
+            if level not in data:
+                return jsonify({
+                    "status": "error",
+                    "message": f"缺少等级: {level}"
+                }), 400
+
+            if "voltage_error" not in data[level] or "loss_error" not in data[level]:
+                return jsonify({
+                    "status": "error",
+                    "message": f"等级 {level} 缺少必需字段"
+                }), 400
+
+        # 更新全局阈值
+        with thresholds_lock:
+            PERFORMANCE_THRESHOLDS.update(data)
+
+        return jsonify({"status": "success", "success": True})
+
+    except Exception as e:
+        print(traceback.format_exc())
+        return jsonify({
+            "status": "error",
+            "message": f"更新阈值失败: {str(e)}"
+        }), 500
