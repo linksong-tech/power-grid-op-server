@@ -8,7 +8,7 @@ from flask import Blueprint
 td3_optimize_bp = Blueprint('td3_optimize', __name__)
 
 # 从各个子模块导入路由函数
-from .td3_optimize_routes import td3_optimize, td3_batch_optimize, get_td3_batch_status, get_performance_thresholds, update_performance_thresholds
+from .td3_optimize_routes import td3_optimize, td3_batch_optimize, get_td3_batch_status, get_performance_thresholds, update_performance_thresholds, get_evaluation_report
 from .td3_model_routes import get_td3_models, get_td3_results, get_td3_result_detail, get_td3_template
 from .td3_training_routes import start_training, get_training_status, stop_training
 from .td3_sample_routes import upload_training_samples, get_training_samples, get_sample_detail, get_test_samples, get_test_sample_detail_route
@@ -39,3 +39,4 @@ td3_optimize_bp.add_url_rule('/api/td3-optimize/powerdata-lines', 'get_powerdata
 td3_optimize_bp.add_url_rule('/api/td3-optimize/upload-task/<task_id>', 'get_upload_task_status', get_upload_task_status, methods=['GET'])
 td3_optimize_bp.add_url_rule('/api/td3-optimize/thresholds', 'get_performance_thresholds', get_performance_thresholds, methods=['GET'])
 td3_optimize_bp.add_url_rule('/api/td3-optimize/thresholds', 'update_performance_thresholds', update_performance_thresholds, methods=['POST'])
+td3_optimize_bp.add_url_rule('/api/td3-optimize/evaluation-report/<job_id>', 'get_evaluation_report', get_evaluation_report, methods=['GET'])
