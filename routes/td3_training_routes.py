@@ -101,27 +101,26 @@ def start_training():
                 'message': 'max_steps 必须是正整数'
             }), 400
         
-        # 初始化训练状态
-        training_status.clear()
-        training_status.update({
-            'is_training': True,
-            'line_id': line_id,
-            'line_name': line_name,
-            'model_name': MODEL_FILENAME_PREFIX,
-            'current_episode': 0,
-            'total_episodes': max_episodes,
-            'current_reward': 0,
-            'current_loss_rate': 0,
-            'best_loss_rate': float('inf'),
-            'message': '正在加载训练数据...',
-            'start_time': datetime.now().isoformat(),
-            'error': None,
-            'training_history': {
-                'rewards': [],
-                'loss_rates': []
-            },
-            'logs': []
-        })
+        # 初始化训练状态 - 直接替换所有字段，避免残留数据
+        training_status['is_training'] = True
+        training_status['line_id'] = line_id
+        training_status['line_name'] = line_name
+        training_status['model_name'] = MODEL_FILENAME_PREFIX
+        training_status['current_episode'] = 0
+        training_status['total_episodes'] = max_episodes
+        training_status['current_reward'] = 0
+        training_status['current_loss_rate'] = 0
+        training_status['best_loss_rate'] = float('inf')
+        training_status['message'] = '正在加载训练数据...'
+        training_status['start_time'] = datetime.now().isoformat()
+        training_status['end_time'] = None
+        training_status['result'] = None
+        training_status['error'] = None
+        training_status['training_history'] = {
+            'rewards': [],
+            'loss_rates': []
+        }
+        training_status['logs'] = []
         
         # 定义进度回调函数
         def progress_callback(episode, reward, loss_rate):
