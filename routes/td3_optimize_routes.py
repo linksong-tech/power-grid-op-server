@@ -115,21 +115,29 @@ def _append_job_log(job_id: str, message: str):
     with batch_jobs_lock:
         job = batch_jobs.get(job_id)
         if not job:
+            print(f"[WARN] Job {job_id} not found in _append_job_log", flush=True)
             return
         job["logs"].append(entry)
         # 限制日志长度
         if len(job["logs"]) > 2000:
             job["logs"] = job["logs"][-2000:]
         job["updated_at"] = datetime.now().isoformat()
+    # 调试输出（Docker环境）
+    print(f"[DEBUG] Job {job_id}: {message}", flush=True)
 
 
 def _update_job(job_id: str, patch: dict):
     with batch_jobs_lock:
         job = batch_jobs.get(job_id)
         if not job:
+            print(f"[WARN] Job {job_id} not found in _update_job", flush=True)
             return
         job.update(patch)
         job["updated_at"] = datetime.now().isoformat()
+    # 调试输出（Docker环境）- 只输出关键字段
+    debug_info = {k: v for k, v in patch.items() if k in ['status', 'progress', 'processed', 'total', 'message']}
+    if debug_info:
+        print(f"[DEBUG] Job {job_id} updated: {debug_info}", flush=True)
 
 
 def _build_tunable_q_nodes(tunable_nodes, bus_data: np.ndarray):
@@ -644,18 +652,35 @@ def td3_batch_optimize():
             _append_job_log(job_id, f"开始批量性能评估：样本数={len(test_samples)}")
 
             def progress_callback(processed, total, sample_time):
-                progress = int(processed / total * 100) if total else 0
-                _update_job(job_id, {
-                    "processed": processed,
-                    "total": total,
-                    "progress": progress,
-                    "current_sample_time": sample_time,
-                    "message": f"处理中 {processed}/{total}",
-                })
-                _append_job_log(job_id, f"完成断面 {processed}/{total}: {sample_time}")
+                try:
+                    progress = int(processed / total * 100) if total else 0
+                    _update_job(job_id, {
+                        "processed": processed,
+                        "total": total,
+                        "progress": progress,
+                        "current_sample_time": sample_time,
+                        "message": f"处理中 {processed}/{total}",
+                    })
+                    _append_job_log(job_id, f"完成断面 {processed}/{total}: {sample_time}")
+                    # 强制刷新输出（Docker环境）
+                    sys.stdout.flush()
+                    sys.stderr.flush()
+                except Exception as e:
+                    print(f"[ERROR] progress_callback failed: {e}", flush=True)
+                    traceback.print_exc()
+
+            def update_callback_wrapper(partial):
+                try:
+                    _update_job(job_id, {"result": partial})
+                    sys.stdout.flush()
+                    sys.stderr.flush()
+                except Exception as e:
+                    print(f"[ERROR] update_callback failed: {e}", flush=True)
+                    traceback.print_exc()
 
             def run_in_background():
                 try:
+                    print(f"[INFO] Starting performance evaluation for job {job_id}", flush=True)
                     result = _run_perf_evaluation(
                         test_samples=test_samples,
                         branch_data=branch_data,
@@ -666,9 +691,10 @@ def td3_batch_optimize():
                         sb=sb,
                         pso_params=pso_params,
                         progress_callback=progress_callback,
-                        update_callback=lambda partial: _update_job(job_id, {"result": partial}),
+                        update_callback=update_callback_wrapper,
                         custom_thresholds=custom_thresholds,
                     )
+                    print(f"[INFO] Performance evaluation completed for job {job_id}", flush=True)
                     _update_job(job_id, {
                         "status": "completed",
                         "progress": 100,
@@ -684,14 +710,18 @@ def td3_batch_optimize():
                     result_file = os.path.join(perf_eval_dir, f'perf_eval_{datetime.now().strftime("%Y%m%d_%H%M%S")}_{job_id}.json')
                     with open(result_file, 'w', encoding='utf-8') as f:
                         json.dump(result, f, ensure_ascii=False, separators=(',', ':'))
+                    print(f"[INFO] Result saved to {result_file}", flush=True)
                 except Exception as e:
+                    error_msg = f"评估失败: {str(e)}"
+                    error_trace = traceback.format_exc()
+                    print(f"[ERROR] {error_msg}", flush=True)
+                    print(error_trace, flush=True)
                     _update_job(job_id, {
                         "status": "failed",
-                        "message": f"评估失败: {str(e)}",
+                        "message": error_msg,
                         "error": str(e),
                     })
-                    _append_job_log(job_id, f"评估失败: {str(e)}")
-                    print(traceback.format_exc())
+                    _append_job_log(job_id, error_msg)
 
             t = threading.Thread(target=run_in_background)
             t.daemon = True
