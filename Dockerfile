@@ -45,4 +45,4 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD python -c "import requests; requests.get('http://localhost:5002/api/health')" || exit 1
 
 # 启动应用
-CMD ["gunicorn", "--config", "gunicorn_config.py", "app:app"]
+CMD ["python", "app.py", "--port", "5002"]
