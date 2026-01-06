@@ -9,6 +9,7 @@ import sys
 import threading
 import uuid
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import traceback
 from typing import Optional
 
@@ -100,6 +101,20 @@ PERFORMANCE_THRESHOLDS = {
 import threading
 thresholds_lock = threading.Lock()
 
+# 评级英文到中文的映射
+RATING_TRANSLATION = {
+    "excellent": "优秀",
+    "good": "良好",
+    "qualified": "合格",
+    "unqualified": "不合格"
+}
+
+
+def get_timezone():
+    """获取时区配置，默认为 Asia/Shanghai"""
+    tz_name = os.environ.get('TZ', 'Asia/Shanghai')
+    return ZoneInfo(tz_name)
+
 
 def _compute_rating(voltage_error: float, loss_error: float) -> str:
     with thresholds_lock:
@@ -109,8 +124,14 @@ def _compute_rating(voltage_error: float, loss_error: float) -> str:
     return "unqualified"
 
 
+def _translate_rating(rating: str) -> str:
+    """将英文评级转换为中文"""
+    return RATING_TRANSLATION.get(rating, rating)
+
+
 def _append_job_log(job_id: str, message: str):
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    tz = get_timezone()
+    ts = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
     entry = f"[{ts}] {message}"
     with batch_jobs_lock:
         job = batch_jobs.get(job_id)
@@ -121,19 +142,20 @@ def _append_job_log(job_id: str, message: str):
         # 限制日志长度
         if len(job["logs"]) > 2000:
             job["logs"] = job["logs"][-2000:]
-        job["updated_at"] = datetime.now().isoformat()
+        job["updated_at"] = datetime.now(tz).isoformat()
     # 调试输出（Docker环境）
     print(f"[DEBUG] Job {job_id}: {message}", flush=True)
 
 
 def _update_job(job_id: str, patch: dict):
+    tz = get_timezone()
     with batch_jobs_lock:
         job = batch_jobs.get(job_id)
         if not job:
             print(f"[WARN] Job {job_id} not found in _update_job", flush=True)
             return
         job.update(patch)
-        job["updated_at"] = datetime.now().isoformat()
+        job["updated_at"] = datetime.now(tz).isoformat()
     # 调试输出（Docker环境）- 只输出关键字段
     debug_info = {k: v for k, v in patch.items() if k in ['status', 'progress', 'processed', 'total', 'message']}
     if debug_info:
@@ -186,6 +208,7 @@ def _run_perf_evaluation(
     progress_callback=None,
     update_callback=None,
     custom_thresholds: Optional[dict] = None,
+    log_callback=None,
 ):
     """
     返回：
@@ -302,6 +325,11 @@ def _run_perf_evaluation(
         ub = float(sample["ub"])
         bus_data = np.array(sample["bus"], dtype=float).reshape(-1, 3)
 
+        # 添加日志：开始处理样本
+        if log_callback:
+            log_callback(f"----- 处理样本 {i+1}/{len(test_samples)} -----")
+            log_callback(f"样本时间：{sample_time}")
+
         try:
             tunable_q_nodes = _build_tunable_q_nodes(tunable_nodes, bus_data)
             if node_names is None:
@@ -374,6 +402,31 @@ def _run_perf_evaluation(
                 loss_error = float("inf")
                 rating = "unqualified"
 
+            # 添加日志：输出优化结果
+            if log_callback:
+                log_callback(f"优化前网损率：{pre_loss:.4f}%")
+                log_callback(f"TD3优化网损率：{rl_loss:.4f}%（相对优化前降低：{rl_reduction_pct:.2f}%）")
+                if pso_convergence and pso_loss is not None:
+                    log_callback(f"PSO优化网损率：{pso_loss:.4f}%（相对优化前降低：{pso_reduction_pct:.2f}%）")
+                    log_callback(f"电压平均误差：{voltage_error:.4f}%，网损误差：{loss_error:.4f}%")
+                    log_callback(f"性能评估：{_translate_rating(rating)}")
+                else:
+                    log_callback(f"PSO优化未收敛")
+
+                # 输出节点无功值详情（表格格式）
+                log_callback("无功调节策略对比：")
+                log_callback(f"{'节点名称':<10} {'RL无功值(MVar)':<14} {'PSO无功值(MVar)':<14} {'无功上下限(MVar)':<20}")
+                log_callback("-" * 70)
+                td3_q_values = td3_result.get("optimized_q_values", [])
+                pso_q_values = pso_result.get("optimal_params", []) if pso_convergence else []
+                for idx, node_info in enumerate(tunable_q_nodes):
+                    node_name = node_info[3]
+                    td3_q = td3_q_values[idx] if idx < len(td3_q_values) else 0.0
+                    pso_q = pso_q_values[idx] if idx < len(pso_q_values) else 0.0
+                    q_min = node_info[1]
+                    q_max = node_info[2]
+                    log_callback(f"{node_name:<12} {td3_q:<14.4f} {pso_q:<14.4f} {q_min:.4f} ~ {q_max:.4f}")
+
             # 节点无功值汇总（平均）
             for idx, q in enumerate(td3_result.get("optimized_q_values", [])):
                 rl_q_sum_by_node[idx] += float(q)
@@ -423,6 +476,9 @@ def _run_perf_evaluation(
             sum_pso_red += float(pso_reduction_pct)
         except Exception as e:
             failed_count += 1
+            # 添加日志：处理失败
+            if log_callback:
+                log_callback(f"❌ 处理失败：{str(e)}")
             results.append({
                 "time": sample_time,
                 "success": False,
@@ -616,6 +672,7 @@ def td3_batch_optimize():
         
         if is_async:
             job_id = uuid.uuid4().hex
+            tz = get_timezone()
             with batch_jobs_lock:
                 batch_jobs[job_id] = {
                     "job_id": job_id,
@@ -645,8 +702,8 @@ def td3_batch_optimize():
                         },
                     },
                     "error": None,
-                    "started_at": datetime.now().isoformat(),
-                    "updated_at": datetime.now().isoformat(),
+                    "started_at": datetime.now(tz).isoformat(),
+                    "updated_at": datetime.now(tz).isoformat(),
                 }
 
             _append_job_log(job_id, f"开始批量性能评估：样本数={len(test_samples)}")
@@ -678,6 +735,14 @@ def td3_batch_optimize():
                     print(f"[ERROR] update_callback failed: {e}", flush=True)
                     traceback.print_exc()
 
+            def log_callback_wrapper(message):
+                """日志回调函数：将日志添加到job的logs数组"""
+                try:
+                    _append_job_log(job_id, message)
+                except Exception as e:
+                    print(f"[ERROR] log_callback failed: {e}", flush=True)
+                    traceback.print_exc()
+
             def run_in_background():
                 try:
                     print(f"[INFO] Starting performance evaluation for job {job_id}", flush=True)
@@ -693,6 +758,7 @@ def td3_batch_optimize():
                         progress_callback=progress_callback,
                         update_callback=update_callback_wrapper,
                         custom_thresholds=custom_thresholds,
+                        log_callback=log_callback_wrapper,
                     )
                     print(f"[INFO] Performance evaluation completed for job {job_id}", flush=True)
                     _update_job(job_id, {
@@ -779,46 +845,33 @@ def _format_datetime(dt_str):
         格式化后的日期时间字符串，如果输入为None则返回None
     """
     if not dt_str:
-        print(f"[DEBUG] _format_datetime: input is None or empty", flush=True)
         return None
-
-    print(f"[DEBUG] _format_datetime: input='{dt_str}', type={type(dt_str)}, len={len(str(dt_str))}", flush=True)
 
     # 如果已经是目标格式，直接返回
     if isinstance(dt_str, str) and len(dt_str) in [16, 19] and dt_str[10] == ' ':
-        print(f"[DEBUG] _format_datetime: already in target format, returning as-is", flush=True)
         return dt_str
 
     try:
         # 尝试解析紧凑格式 YYYYMMDDHHmm (12位，无秒) -> 格式化为 YYYY-MM-DD HH:mm
         if isinstance(dt_str, str) and len(dt_str) == 12 and dt_str.isdigit():
             dt = datetime.strptime(dt_str, "%Y%m%d%H%M")
-            formatted = dt.strftime("%Y-%m-%d %H:%M")
-            print(f"[DEBUG] _format_datetime: parsed compact format (no seconds) -> '{formatted}'", flush=True)
-            return formatted
+            return dt.strftime("%Y-%m-%d %H:%M")
 
         # 尝试解析紧凑格式 YYYYMMDDHHmmss (14位，有秒) -> 格式化为 YYYY-MM-DD HH:mm:ss
         if isinstance(dt_str, str) and len(dt_str) == 14 and dt_str.isdigit():
             dt = datetime.strptime(dt_str, "%Y%m%d%H%M%S")
-            formatted = dt.strftime("%Y-%m-%d %H:%M:%S")
-            print(f"[DEBUG] _format_datetime: parsed compact format (with seconds) -> '{formatted}'", flush=True)
-            return formatted
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
 
         # 尝试解析ISO格式
         dt = datetime.fromisoformat(dt_str)
-        formatted = dt.strftime("%Y-%m-%d %H:%M:%S")
-        print(f"[DEBUG] _format_datetime: parsed ISO format -> '{formatted}'", flush=True)
-        return formatted
-    except (ValueError, AttributeError) as e:
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    except (ValueError, AttributeError):
         # 如果解析失败，返回原始字符串
-        print(f"[DEBUG] _format_datetime: parse failed ({e}), returning original", flush=True)
         return dt_str
 
 
 def get_td3_batch_status(job_id: str):
     """获取批量评估任务状态（供前端短轮询）"""
-    print(f"[DEBUG] get_td3_batch_status called for job_id={job_id}", flush=True)
-
     with batch_jobs_lock:
         job = batch_jobs.get(job_id)
         if not job:
@@ -830,24 +883,15 @@ def get_td3_batch_status(job_id: str):
 
         # 格式化 current_sample_time 字段
         if "current_sample_time" in job_data:
-            original_time = job_data["current_sample_time"]
-            print(f"[DEBUG] Formatting current_sample_time: '{original_time}'", flush=True)
             job_data["current_sample_time"] = _format_datetime(job_data["current_sample_time"])
-            print(f"[DEBUG] After formatting: '{job_data['current_sample_time']}'", flush=True)
 
         # 格式化 result.results 中的 time 字段
         if "result" in job_data and isinstance(job_data["result"], dict):
             if "results" in job_data["result"] and isinstance(job_data["result"]["results"], list):
-                results_count = len(job_data["result"]["results"])
-                print(f"[DEBUG] Found {results_count} results to format", flush=True)
-                for idx, result_item in enumerate(job_data["result"]["results"]):
+                for result_item in job_data["result"]["results"]:
                     if isinstance(result_item, dict) and "time" in result_item:
-                        original_time = result_item["time"]
-                        print(f"[DEBUG] Formatting result[{idx}].time: '{original_time}'", flush=True)
                         result_item["time"] = _format_datetime(result_item["time"])
-                        print(f"[DEBUG] After formatting result[{idx}].time: '{result_item['time']}'", flush=True)
 
-        print(f"[DEBUG] Returning formatted job data", flush=True)
         return jsonify({"status": "success", "data": job_data})
 
 
