@@ -290,7 +290,7 @@ class LineService:
             print(f"[ERROR] 删除线路失败: {e}")
             return False
 
-    def upload_training_sample(self, line_id: str, archive_path: str) -> bool:
+    def upload_training_sample(self, line_id: str, archive_path: str) -> Optional[str]:
         """
         上传训练样本压缩包
 
@@ -299,38 +299,41 @@ class LineService:
             archive_path: 压缩包路径
 
         Returns:
-            是否成功
+            压缩包文件名，失败返回None
         """
         try:
             line_dir = self._get_line_dir(line_id)
             if not os.path.exists(line_dir):
-                return False
-            
+                return None
+
+            # 获取压缩包文件名
+            archive_filename = os.path.basename(archive_path)
+
             train_dir = os.path.join(line_dir, 'train')
-            
+
             # 清空train目录
             if os.path.exists(train_dir):
                 shutil.rmtree(train_dir)
             os.makedirs(train_dir, exist_ok=True)
-            
+
             # 解压到train目录
             if not self._extract_archive(archive_path, train_dir):
-                return False
-            
+                return None
+
             # 更新线路信息
             line_data = self._read_line_json(line_id)
             if line_data:
-                line_data['trainingSamplePath'] = 'train'
+                line_data['trainingSamplePath'] = archive_filename
                 line_data['updatedAt'] = datetime.now().isoformat()
                 self._write_line_json(line_id, line_data)
-            
-            return True
-            
+
+            return archive_filename
+
         except Exception as e:
             print(f"[ERROR] 上传训练样本失败: {e}")
-            return False
+            return None
 
-    def upload_test_sample(self, line_id: str, archive_path: str) -> bool:
+    def upload_test_sample(self, line_id: str, archive_path: str) -> Optional[str]:
         """
         上传测试样本压缩包
 
@@ -339,36 +342,39 @@ class LineService:
             archive_path: 压缩包路径
 
         Returns:
-            是否成功
+            压缩包文件名，失败返回None
         """
         try:
             line_dir = self._get_line_dir(line_id)
             if not os.path.exists(line_dir):
-                return False
-            
+                return None
+
+            # 获取压缩包文件名
+            archive_filename = os.path.basename(archive_path)
+
             test_dir = os.path.join(line_dir, 'test')
-            
+
             # 清空test目录
             if os.path.exists(test_dir):
                 shutil.rmtree(test_dir)
             os.makedirs(test_dir, exist_ok=True)
-            
+
             # 解压到test目录
             if not self._extract_archive(archive_path, test_dir):
-                return False
-            
+                return None
+
             # 更新线路信息
             line_data = self._read_line_json(line_id)
             if line_data:
-                line_data['testSamplePath'] = 'test'
+                line_data['testSamplePath'] = archive_filename
                 line_data['updatedAt'] = datetime.now().isoformat()
                 self._write_line_json(line_id, line_data)
-            
-            return True
-            
+
+            return archive_filename
+
         except Exception as e:
             print(f"[ERROR] 上传测试样本失败: {e}")
-            return False
+            return None
 
     def get_training_samples(self, line_id: str) -> List[Dict[str, Any]]:
         """

@@ -159,13 +159,17 @@ def upload_training_sample(line_id):
         temp_path = os.path.join(temp_dir, filename)
         file.save(temp_path)
         
-        success = line_service.upload_training_sample(line_id, temp_path)
+        archive_filename = line_service.upload_training_sample(line_id, temp_path)
         shutil.rmtree(temp_dir)
-        
-        if not success:
+
+        if not archive_filename:
             return jsonify({'status': 'error', 'message': '上传训练样本失败'}), 500
-        
-        return jsonify({'status': 'success', 'message': '上传成功'})
+
+        return jsonify({
+            'status': 'success',
+            'message': '上传成功',
+            'data': {'filename': archive_filename}
+        })
         
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'上传失败: {str(e)}'}), 500
@@ -192,13 +196,17 @@ def upload_test_sample(line_id):
         temp_path = os.path.join(temp_dir, filename)
         file.save(temp_path)
         
-        success = line_service.upload_test_sample(line_id, temp_path)
+        archive_filename = line_service.upload_test_sample(line_id, temp_path)
         shutil.rmtree(temp_dir)
-        
-        if not success:
+
+        if not archive_filename:
             return jsonify({'status': 'error', 'message': '上传测试样本失败'}), 500
-        
-        return jsonify({'status': 'success', 'message': '上传成功'})
+
+        return jsonify({
+            'status': 'success',
+            'message': '上传成功',
+            'data': {'filename': archive_filename}
+        })
         
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'上传失败: {str(e)}'}), 500
