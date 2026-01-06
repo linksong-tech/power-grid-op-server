@@ -763,13 +763,92 @@ def td3_batch_optimize():
         }), 500
 
 
+def _format_datetime(dt_str):
+    """
+    将日期时间字符串转换为 YYYY-MM-DD HH:mm 或 YYYY-MM-DD HH:mm:ss 格式
+    支持多种输入格式：
+    - ISO格式：2026-01-06T10:30:45
+    - 紧凑格式（无秒）：202601061030 -> 2026-01-06 10:30
+    - 紧凑格式（有秒）：20260106103045 -> 2026-01-06 10:30:45
+    - 已格式化：2026-01-06 10:30:45
+
+    Args:
+        dt_str: 日期时间字符串或None
+
+    Returns:
+        格式化后的日期时间字符串，如果输入为None则返回None
+    """
+    if not dt_str:
+        print(f"[DEBUG] _format_datetime: input is None or empty", flush=True)
+        return None
+
+    print(f"[DEBUG] _format_datetime: input='{dt_str}', type={type(dt_str)}, len={len(str(dt_str))}", flush=True)
+
+    # 如果已经是目标格式，直接返回
+    if isinstance(dt_str, str) and len(dt_str) in [16, 19] and dt_str[10] == ' ':
+        print(f"[DEBUG] _format_datetime: already in target format, returning as-is", flush=True)
+        return dt_str
+
+    try:
+        # 尝试解析紧凑格式 YYYYMMDDHHmm (12位，无秒) -> 格式化为 YYYY-MM-DD HH:mm
+        if isinstance(dt_str, str) and len(dt_str) == 12 and dt_str.isdigit():
+            dt = datetime.strptime(dt_str, "%Y%m%d%H%M")
+            formatted = dt.strftime("%Y-%m-%d %H:%M")
+            print(f"[DEBUG] _format_datetime: parsed compact format (no seconds) -> '{formatted}'", flush=True)
+            return formatted
+
+        # 尝试解析紧凑格式 YYYYMMDDHHmmss (14位，有秒) -> 格式化为 YYYY-MM-DD HH:mm:ss
+        if isinstance(dt_str, str) and len(dt_str) == 14 and dt_str.isdigit():
+            dt = datetime.strptime(dt_str, "%Y%m%d%H%M%S")
+            formatted = dt.strftime("%Y-%m-%d %H:%M:%S")
+            print(f"[DEBUG] _format_datetime: parsed compact format (with seconds) -> '{formatted}'", flush=True)
+            return formatted
+
+        # 尝试解析ISO格式
+        dt = datetime.fromisoformat(dt_str)
+        formatted = dt.strftime("%Y-%m-%d %H:%M:%S")
+        print(f"[DEBUG] _format_datetime: parsed ISO format -> '{formatted}'", flush=True)
+        return formatted
+    except (ValueError, AttributeError) as e:
+        # 如果解析失败，返回原始字符串
+        print(f"[DEBUG] _format_datetime: parse failed ({e}), returning original", flush=True)
+        return dt_str
+
+
 def get_td3_batch_status(job_id: str):
     """获取批量评估任务状态（供前端短轮询）"""
+    print(f"[DEBUG] get_td3_batch_status called for job_id={job_id}", flush=True)
+
     with batch_jobs_lock:
         job = batch_jobs.get(job_id)
         if not job:
             return jsonify({"status": "error", "message": "任务不存在"}), 404
-        return jsonify({"status": "success", "data": job})
+
+        # 深拷贝job数据以避免修改原始数据
+        import copy
+        job_data = copy.deepcopy(job)
+
+        # 格式化 current_sample_time 字段
+        if "current_sample_time" in job_data:
+            original_time = job_data["current_sample_time"]
+            print(f"[DEBUG] Formatting current_sample_time: '{original_time}'", flush=True)
+            job_data["current_sample_time"] = _format_datetime(job_data["current_sample_time"])
+            print(f"[DEBUG] After formatting: '{job_data['current_sample_time']}'", flush=True)
+
+        # 格式化 result.results 中的 time 字段
+        if "result" in job_data and isinstance(job_data["result"], dict):
+            if "results" in job_data["result"] and isinstance(job_data["result"]["results"], list):
+                results_count = len(job_data["result"]["results"])
+                print(f"[DEBUG] Found {results_count} results to format", flush=True)
+                for idx, result_item in enumerate(job_data["result"]["results"]):
+                    if isinstance(result_item, dict) and "time" in result_item:
+                        original_time = result_item["time"]
+                        print(f"[DEBUG] Formatting result[{idx}].time: '{original_time}'", flush=True)
+                        result_item["time"] = _format_datetime(result_item["time"])
+                        print(f"[DEBUG] After formatting result[{idx}].time: '{result_item['time']}'", flush=True)
+
+        print(f"[DEBUG] Returning formatted job data", flush=True)
+        return jsonify({"status": "success", "data": job_data})
 
 
 def get_performance_thresholds():
