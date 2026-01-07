@@ -90,11 +90,12 @@ def load_test_samples_by_line_id(line_id):
 
 
 # 全局性能阈值配置（可通过API动态修改）
+# 注意：unqualified 使用 float('inf') 表示无限制，JSON 序列化时会转为 null
 PERFORMANCE_THRESHOLDS = {
     "excellent": {"voltage_error": 0.5, "loss_error": 3.0},
     "good": {"voltage_error": 1.0, "loss_error": 4.0},
     "qualified": {"voltage_error": 2.0, "loss_error": 5.0},
-    "unqualified": {"voltage_error": float("inf"), "loss_error": float("inf")},
+    "unqualified": {"voltage_error": float('inf'), "loss_error": float('inf')},
 }
 
 # 用于线程安全的阈值访问
@@ -127,6 +128,19 @@ def _compute_rating(voltage_error: float, loss_error: float) -> str:
 def _translate_rating(rating: str) -> str:
     """将英文评级转换为中文"""
     return RATING_TRANSLATION.get(rating, rating)
+
+
+def _sanitize_for_json(value):
+    """
+    将 Python 值转换为 JSON 安全的值
+    - float('inf') -> None (JSON 中为 null)
+    - float('-inf') -> None
+    - float('nan') -> None
+    """
+    if isinstance(value, float):
+        if np.isinf(value) or np.isnan(value):
+            return None
+    return value
 
 
 def _append_job_log(job_id: str, message: str):
@@ -225,15 +239,37 @@ def _run_perf_evaluation(
 
     # 使用自定义阈值或全局阈值
     if custom_thresholds:
-        thresholds = custom_thresholds
+        # 将前端传入的 null 转换为 float('inf')
+        thresholds = {}
+        for label, threshold in custom_thresholds.items():
+            if threshold is None or not isinstance(threshold, dict):
+                thresholds[label] = {"voltage_error": float('inf'), "loss_error": float('inf')}
+            else:
+                thresholds[label] = {
+                    "voltage_error": float('inf') if threshold.get("voltage_error") is None else threshold.get("voltage_error"),
+                    "loss_error": float('inf') if threshold.get("loss_error") is None else threshold.get("loss_error"),
+                }
     else:
         with thresholds_lock:
             thresholds = PERFORMANCE_THRESHOLDS.copy()
 
     def compute_rating(voltage_error: float, loss_error: float) -> str:
+        # 处理 None 值或无效值
+        if voltage_error is None or loss_error is None:
+            return "unqualified"
+        if not isinstance(voltage_error, (int, float)) or not isinstance(loss_error, (int, float)):
+            return "unqualified"
+
         for label, threshold in thresholds.items():
-            if voltage_error < threshold["voltage_error"] and loss_error < threshold["loss_error"]:
+            # 防御性检查：确保阈值本身不是 None
+            if threshold is None or not isinstance(threshold, dict):
+                continue
+            v_threshold = threshold.get("voltage_error", float('inf'))
+            l_threshold = threshold.get("loss_error", float('inf'))
+
+            if voltage_error < v_threshold and loss_error < l_threshold:
                 return label
+
         return "unqualified"
 
     num_particles = int(pso_params.get("num_particles", 30))
@@ -292,8 +328,8 @@ def _run_perf_evaluation(
                 "avg_pso_loss": 0.0,
                 "avg_rl_relative_reduction": 0.0,
                 "avg_pso_relative_reduction": 0.0,
-                "avg_voltage_average_error": float("inf"),
-                "avg_loss_error": float("inf"),
+                "avg_voltage_average_error": _sanitize_for_json(float('inf')),
+                "avg_loss_error": _sanitize_for_json(float('inf')),
                 "overall_rating": "unqualified",
                 "node_summary": build_node_summary(),
             }
@@ -378,47 +414,58 @@ def _run_perf_evaluation(
                 pr=pr,
             )
 
+            # 检查 PSO 是否收敛（参考 rlEval_TD3pure.py:954-961）
             pso_convergence = bool(pso_result.get("convergence", False))
+            if not pso_convergence:
+                # PSO 未收敛，跳过该样本
+                if log_callback:
+                    log_callback(f"PSO优化未收敛，跳过该样本")
+                failed_count += 1
+                continue
+
+            # 提取优化结果
             rl_loss = float(td3_result["optimized_loss_rate"])
             rl_initial_loss = float(td3_result["initial_loss_rate"])
-            pso_loss = float(pso_result["optimal_loss_rate"]) if pso_convergence else None
+            pso_loss = float(pso_result["optimal_loss_rate"])
             pso_initial_loss = float(pso_result.get("initial_loss_rate", rl_initial_loss))
+            pso_voltages = np.array(pso_result["final_voltages"], dtype=float)
 
+            # 验证数据有效性（防止 NaN 或 None 值）
+            if np.any(np.isnan(pso_voltages)) or np.any(np.isnan(rl_voltages)):
+                if log_callback:
+                    log_callback(f"电压数据包含无效值（NaN），跳过该样本")
+                failed_count += 1
+                continue
+
+            # 计算降幅
             pre_loss = pso_initial_loss
             rl_reduction_pct = (pre_loss - rl_loss) / pre_loss * 100.0 if pre_loss else 0.0
-            pso_reduction_pct = (pre_loss - pso_loss) / pre_loss * 100.0 if (pre_loss and pso_loss is not None) else 0.0
+            pso_reduction_pct = (pre_loss - pso_loss) / pre_loss * 100.0 if pre_loss else 0.0
 
-            voltage_error = None
-            loss_error = None
-            rating = None
+            # 计算误差（参考 rlEval_TD3pure.py:984，使用相对误差百分比）
+            # 电压平均误差（MAE百分比）
+            voltage_errors = np.abs(rl_voltages - pso_voltages) / pso_voltages * 100
+            voltage_error = float(np.mean(voltage_errors))
+            # 网损误差（相对误差百分比）
+            loss_error = float(np.abs(rl_loss - pso_loss) / pso_loss * 100) if pso_loss != 0 else float('inf')
 
-            if pso_convergence and pso_loss is not None:
-                pso_voltages = np.array(pso_result["final_voltages"], dtype=float)
-                voltage_error = float(np.mean(np.abs(rl_voltages - pso_voltages)) / ub * 100.0) if ub else 0.0
-                loss_error = float(abs(rl_loss - pso_loss))
-                rating = compute_rating(voltage_error, loss_error)
-            else:
-                voltage_error = float("inf")
-                loss_error = float("inf")
-                rating = "unqualified"
+            # 性能评级
+            rating = compute_rating(voltage_error, loss_error)
 
-            # 添加日志：输出优化结果
+            # 添加日志：输出优化结果（参考 rlEval_TD3pure.py:978-989）
             if log_callback:
                 log_callback(f"优化前网损率：{pre_loss:.4f}%")
                 log_callback(f"TD3优化网损率：{rl_loss:.4f}%（相对优化前降低：{rl_reduction_pct:.2f}%）")
-                if pso_convergence and pso_loss is not None:
-                    log_callback(f"PSO优化网损率：{pso_loss:.4f}%（相对优化前降低：{pso_reduction_pct:.2f}%）")
-                    log_callback(f"电压平均误差：{voltage_error:.4f}%，网损误差：{loss_error:.4f}%")
-                    log_callback(f"性能评估：{_translate_rating(rating)}")
-                else:
-                    log_callback(f"PSO优化未收敛")
+                log_callback(f"PSO优化网损率：{pso_loss:.4f}%（相对优化前降低：{pso_reduction_pct:.2f}%）")
+                log_callback(f"电压平均误差：{voltage_error:.4f}%，网损误差：{loss_error:.4f}%")
+                log_callback(f"性能评估：{_translate_rating(rating)}")
 
                 # 输出节点无功值详情（表格格式）
                 log_callback("无功调节策略对比：")
                 log_callback(f"{'节点名称':<10} {'RL无功值(MVar)':<14} {'PSO无功值(MVar)':<14} {'无功上下限(MVar)':<20}")
                 log_callback("-" * 70)
                 td3_q_values = td3_result.get("optimized_q_values", [])
-                pso_q_values = pso_result.get("optimal_params", []) if pso_convergence else []
+                pso_q_values = pso_result.get("optimal_params", [])
                 for idx, node_info in enumerate(tunable_q_nodes):
                     node_name = node_info[3]
                     td3_q = td3_q_values[idx] if idx < len(td3_q_values) else 0.0
@@ -427,15 +474,15 @@ def _run_perf_evaluation(
                     q_max = node_info[2]
                     log_callback(f"{node_name:<12} {td3_q:<14.4f} {pso_q:<14.4f} {q_min:.4f} ~ {q_max:.4f}")
 
-            # 节点无功值汇总（平均）
+            # 节点无功值汇总（平均）- PSO已确保收敛
             for idx, q in enumerate(td3_result.get("optimized_q_values", [])):
                 rl_q_sum_by_node[idx] += float(q)
                 rl_q_count_by_node[idx] += 1
-            if pso_convergence:
-                for idx, q in enumerate(pso_result.get("optimal_params", [])):
-                    pso_q_sum_by_node[idx] += float(q)
-                    pso_q_count_by_node[idx] += 1
+            for idx, q in enumerate(pso_result.get("optimal_params", [])):
+                pso_q_sum_by_node[idx] += float(q)
+                pso_q_count_by_node[idx] += 1
 
+            # 记录结果（参考 rlEval_TD3pure.py:994-1007）
             results.append({
                 "time": sample_time,
                 "success": True,
@@ -446,15 +493,15 @@ def _run_perf_evaluation(
                 "voltage_violations": int(td3_result.get("voltage_violations", 0)),
                 "optimized_voltages": rl_voltages.tolist(),
                 "optimized_q_values": td3_result.get("optimized_q_values", []),
-                # PSO
-                "pso_convergence": pso_convergence,
+                # PSO（已确保收敛）
+                "pso_convergence": True,
                 "pso_initial_loss_rate": round(pso_initial_loss, 4),
-                "pso_optimal_loss_rate": round(pso_loss, 4) if pso_loss is not None else None,
+                "pso_optimal_loss_rate": round(pso_loss, 4),
                 "pso_optimal_params": pso_result.get("optimal_params", []),
-                "pso_final_voltages": pso_result.get("final_voltages", []) if pso_convergence else None,
-                # 误差&评级（用于性能评估UI）
-                "voltage_average_error": round(voltage_error, 4),
-                "loss_error": round(loss_error, 4),
+                "pso_final_voltages": pso_result.get("final_voltages", []),
+                # 误差&评级（用于性能评估UI）- 使用 _sanitize_for_json 处理 inf
+                "voltage_average_error": _sanitize_for_json(round(voltage_error, 4) if not np.isinf(voltage_error) else voltage_error),
+                "loss_error": _sanitize_for_json(round(loss_error, 4) if not np.isinf(loss_error) else loss_error),
                 "performance_rating": rating,
                 # 额外（便于前端展示降幅）
                 "pre_optimization_loss": round(pre_loss, 4),
@@ -464,21 +511,27 @@ def _run_perf_evaluation(
 
             successful_count += 1
 
+            # 统计汇总（PSO已确保收敛）
             ok_count += 1
             sum_pre += float(pre_loss)
             sum_rl += float(rl_loss)
             sum_rl_red += float(rl_reduction_pct)
             sum_v_err += float(voltage_error)
             sum_l_err += float(loss_error)
-            if pso_convergence and pso_loss is not None:
-                pso_ok_count += 1
-                sum_pso += float(pso_loss)
+            pso_ok_count += 1
+            sum_pso += float(pso_loss)
             sum_pso_red += float(pso_reduction_pct)
         except Exception as e:
             failed_count += 1
-            # 添加日志：处理失败
+            # 添加日志：处理失败（包含详细堆栈信息）
             if log_callback:
                 log_callback(f"❌ 处理失败：{str(e)}")
+                # 添加详细的堆栈跟踪
+                import traceback
+                stack_trace = traceback.format_exc()
+                for line in stack_trace.split('\n'):
+                    if line.strip():
+                        log_callback(f"  {line}")
             results.append({
                 "time": sample_time,
                 "success": False,
@@ -695,8 +748,8 @@ def td3_batch_optimize():
                             "avg_pso_loss": 0.0,
                             "avg_rl_relative_reduction": 0.0,
                             "avg_pso_relative_reduction": 0.0,
-                            "avg_voltage_average_error": float("inf"),
-                            "avg_loss_error": float("inf"),
+                            "avg_voltage_average_error": _sanitize_for_json(float('inf')),
+                            "avg_loss_error": _sanitize_for_json(float('inf')),
                             "overall_rating": "unqualified",
                             "node_summary": [],
                         },
@@ -896,9 +949,16 @@ def get_td3_batch_status(job_id: str):
 
 
 def get_performance_thresholds():
-    """获取当前性能阈值配置"""
+    """获取当前性能阈值配置（将 float('inf') 转换为 null）"""
     with thresholds_lock:
-        return jsonify(PERFORMANCE_THRESHOLDS)
+        # 深拷贝并转换 inf 为 null
+        thresholds_for_json = {}
+        for label, threshold in PERFORMANCE_THRESHOLDS.items():
+            thresholds_for_json[label] = {
+                "voltage_error": _sanitize_for_json(threshold["voltage_error"]),
+                "loss_error": _sanitize_for_json(threshold["loss_error"]),
+            }
+        return jsonify({"status": "success", "data": thresholds_for_json})
 
 
 def update_performance_thresholds():
