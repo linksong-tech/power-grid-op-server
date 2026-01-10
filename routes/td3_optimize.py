@@ -14,6 +14,7 @@ from .td3_training_routes import start_training, get_training_status, stop_train
 from .td3_sample_routes import upload_training_samples, get_training_samples, get_sample_detail, get_test_samples, get_test_sample_detail_route
 from .td3_agent_routes import get_trained_agents, get_agent_detail, delete_agent
 from .td3_data_routes import upload_powerdata_archive, get_powerdata_lines, get_upload_task_status
+from .td3_realtime_routes import realtime_strategy
 
 # 注册所有路由到主蓝图
 td3_optimize_bp.add_url_rule('/api/td3-optimize/optimize', 'td3_optimize', td3_optimize, methods=['POST'])
@@ -40,3 +41,4 @@ td3_optimize_bp.add_url_rule('/api/td3-optimize/upload-task/<task_id>', 'get_upl
 td3_optimize_bp.add_url_rule('/api/td3-optimize/thresholds', 'get_performance_thresholds', get_performance_thresholds, methods=['GET'])
 td3_optimize_bp.add_url_rule('/api/td3-optimize/thresholds', 'update_performance_thresholds', update_performance_thresholds, methods=['POST'])
 td3_optimize_bp.add_url_rule('/api/td3-optimize/evaluation-report/<job_id>', 'get_evaluation_report', get_evaluation_report, methods=['GET'])
+td3_optimize_bp.add_url_rule('/api/td3-optimize/realtime-strategy', 'realtime_strategy', realtime_strategy, methods=['POST'])
