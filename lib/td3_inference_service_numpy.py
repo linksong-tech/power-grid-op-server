@@ -10,6 +10,12 @@ from typing import Dict, List, Tuple, Optional
 from td3_core.numpy_models import ActorNetworkNumpy
 from td3_core.power_flow import power_flow_calculation
 from td3_core.numpy_backend import DTYPE
+try:
+    # When imported with lib/ on sys.path (e.g. routes add lib to sys.path).
+    from voltage_bounds import compute_voltage_bounds_kv
+except ModuleNotFoundError:  # pragma: no cover
+    # When imported as a package module (e.g. import lib.td3_inference_service_numpy).
+    from .voltage_bounds import compute_voltage_bounds_kv
 
 
 class TD3InferenceServiceNumpy:
@@ -172,6 +178,9 @@ def optimize_reactive_power(
         }
     """
     try:
+        v_bounds_kv = compute_voltage_bounds_kv(voltage_limits[0], voltage_limits[1], ub)
+        voltage_limits_kv = (v_bounds_kv.v_min_kv, v_bounds_kv.v_max_kv)
+
         # 1. 计算优化前状态
         initial_q = [bus_data[node[0], 2] for node in tunable_q_nodes]
         initial_loss, initial_voltages, _ = power_flow_calculation(
@@ -192,7 +201,7 @@ def optimize_reactive_power(
             model_path=model_path,
             state_dim=state_dim,
             action_dim=action_dim,
-            voltage_limits=voltage_limits,
+            voltage_limits=voltage_limits_kv,
             key_nodes=key_nodes
         )
         
@@ -211,7 +220,7 @@ def optimize_reactive_power(
             }
         
         # 5. 计算电压越限
-        v_min, v_max = voltage_limits
+        v_min, v_max = voltage_limits_kv
         voltage_violations = sum(1 for v in optimized_voltages if v < v_min or v > v_max)
         
         # 6. 构建无功调节详情
@@ -350,4 +359,3 @@ def batch_optimize(
         'results': results,
         'summary': summary
     }
-

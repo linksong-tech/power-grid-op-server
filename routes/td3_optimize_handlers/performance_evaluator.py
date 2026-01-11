@@ -76,7 +76,7 @@ def run_performance_evaluation(
             v_threshold = threshold.get("voltage_error", float('inf'))
             l_threshold = threshold.get("loss_error", float('inf'))
 
-            if voltage_error < v_threshold and loss_error < l_threshold:
+            if voltage_error <= v_threshold and loss_error <= l_threshold:
                 return label
 
         return "unqualified"

@@ -1,14 +1,13 @@
 import copy
-from dataclasses import dataclass
 from typing import Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
-
-
-@dataclass(frozen=True)
-class _VoltageBounds:
-    v_min_kv: float
-    v_max_kv: float
+try:
+    # When imported with lib/ on sys.path (e.g. routes add lib to sys.path).
+    from voltage_bounds import compute_voltage_bounds_kv
+except ModuleNotFoundError:  # pragma: no cover
+    # When imported as a package module (e.g. import lib.pso_op_v2).
+    from .voltage_bounds import compute_voltage_bounds_kv
 
 
 def _as_2d_float_array(arr, cols: int, name: str) -> np.ndarray:
@@ -16,17 +15,6 @@ def _as_2d_float_array(arr, cols: int, name: str) -> np.ndarray:
     if a.ndim != 2 or a.shape[1] != cols:
         raise ValueError(f"{name} must be a 2D array with shape (n, {cols}), got {a.shape}")
     return a
-
-
-def _compute_voltage_bounds(v_min: float, v_max: float, ub_kv: float) -> _VoltageBounds:
-    """
-    Backward-compatible voltage bounds handling:
-    - If v_min/v_max look like per-unit (<= ~2.0), convert using UB (kV).
-    - Otherwise, treat them as kV directly (matches IntVQ_PSO style).
-    """
-    if v_min <= 2.0 and v_max <= 2.0:
-        return _VoltageBounds(v_min_kv=float(v_min) * float(ub_kv), v_max_kv=float(v_max) * float(ub_kv))
-    return _VoltageBounds(v_min_kv=float(v_min), v_max_kv=float(v_max))
 
 
 def _power_flow_forward_backward_sweep(
@@ -246,7 +234,7 @@ def pso_op(
             "fitness_history": [],
         }
 
-    v_bounds = _compute_voltage_bounds(v_min, v_max, UB)
+    v_bounds = compute_voltage_bounds_kv(v_min, v_max, UB)
 
     def eval_fitness(q_values: Sequence[float]) -> Tuple[float, Optional[float], Optional[np.ndarray], Optional[tuple]]:
         loss_rate, voltages_kv, power_info = _power_flow_forward_backward_sweep(

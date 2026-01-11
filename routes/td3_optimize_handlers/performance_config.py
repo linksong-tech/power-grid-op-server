@@ -28,7 +28,7 @@ def compute_rating(voltage_error: float, loss_error: float) -> str:
     """计算性能评级"""
     with thresholds_lock:
         for label, threshold in PERFORMANCE_THRESHOLDS.items():
-            if voltage_error < threshold["voltage_error"] and loss_error < threshold["loss_error"]:
+            if voltage_error <= threshold["voltage_error"] and loss_error <= threshold["loss_error"]:
                 return label
     return "unqualified"
 
