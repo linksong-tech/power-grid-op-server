@@ -69,20 +69,33 @@ def run_performance_evaluation(
         if not isinstance(voltage_error, (int, float)) or not isinstance(loss_error, (int, float)):
             return "unqualified"
 
-        for label, threshold in thresholds.items():
-            # 防御性检查：确保阈值本身不是 None
+        # 与参考脚本口径对齐：按“优秀/良好/合格/不合格”的顺序依次匹配。
+        # 这里用英文key：excellent/good/qualified/unqualified
+        preferred_order = ("excellent", "good", "qualified", "unqualified")
+        for label in preferred_order:
+            threshold = thresholds.get(label)
             if threshold is None or not isinstance(threshold, dict):
                 continue
-            v_threshold = threshold.get("voltage_error", float('inf'))
-            l_threshold = threshold.get("loss_error", float('inf'))
+            v_threshold = threshold.get("voltage_error", float("inf"))
+            l_threshold = threshold.get("loss_error", float("inf"))
+            if voltage_error <= v_threshold and loss_error <= l_threshold:
+                return label
 
+        # 兼容自定义阈值里额外的key：按其自身顺序继续匹配
+        for label, threshold in thresholds.items():
+            if label in preferred_order:
+                continue
+            if threshold is None or not isinstance(threshold, dict):
+                continue
+            v_threshold = threshold.get("voltage_error", float("inf"))
+            l_threshold = threshold.get("loss_error", float("inf"))
             if voltage_error <= v_threshold and loss_error <= l_threshold:
                 return label
 
         return "unqualified"
 
     # PSO参数
-    num_particles = int(pso_params.get("num_particles", 30))
+    num_particles = int(pso_params.get("num_particles", 20))
     max_iter = int(pso_params.get("max_iter", 50))
     w = float(pso_params.get("w", 0.8))
     c1 = float(pso_params.get("c1", 1.5))
@@ -251,7 +264,7 @@ def run_performance_evaluation(
                 continue
 
             # 计算降幅
-            pre_loss = pso_initial_loss
+            pre_loss = rl_initial_loss
             rl_reduction_pct = (pre_loss - rl_loss) / pre_loss * 100.0 if pre_loss else 0.0
             pso_reduction_pct = (pre_loss - pso_loss) / pre_loss * 100.0 if pre_loss else 0.0
 
