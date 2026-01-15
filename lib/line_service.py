@@ -169,6 +169,7 @@ class LineService:
             
             # 保存可选字段
             optional_fields = [
+                'systemLineId', 'voltageLevel',
                 'lineParams', 'historyOc', 'adjustablePv',
                 'voltageLimit', 'keyNodes', 'historyOcDate',
                 'busVoltage', 'trainingSamplePath', 'testSamplePath',

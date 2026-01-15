@@ -26,6 +26,22 @@ def create_line():
         
         if not data.get('ring'):
             return jsonify({'status': 'error', 'message': '所在标准环不能为空'}), 400
+
+        if not data.get('systemLineId'):
+            return jsonify({'status': 'error', 'message': '线路ID不能为空'}), 400
+
+        if data.get('voltageLevel') is None:
+            return jsonify({'status': 'error', 'message': '电压等级不能为空'}), 400
+
+        try:
+            voltage_level = int(data.get('voltageLevel'))
+        except Exception:
+            return jsonify({'status': 'error', 'message': '电压等级格式错误'}), 400
+
+        if voltage_level not in (10, 20):
+            return jsonify({'status': 'error', 'message': '电压等级仅支持10kV/20kV'}), 400
+
+        data['voltageLevel'] = voltage_level
         
         line_data = line_service.create_line(data)
         
@@ -111,6 +127,20 @@ def update_line(line_id):
         
         if not data:
             return jsonify({'status': 'error', 'message': '请求数据为空'}), 400
+
+        if 'systemLineId' in data and not data.get('systemLineId'):
+            return jsonify({'status': 'error', 'message': '线路ID不能为空'}), 400
+
+        if 'voltageLevel' in data:
+            try:
+                voltage_level = int(data.get('voltageLevel'))
+            except Exception:
+                return jsonify({'status': 'error', 'message': '电压等级格式错误'}), 400
+
+            if voltage_level not in (10, 20):
+                return jsonify({'status': 'error', 'message': '电压等级仅支持10kV/20kV'}), 400
+
+            data['voltageLevel'] = voltage_level
         
         line_data = line_service.update_line(line_id, data)
         
