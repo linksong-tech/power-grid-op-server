@@ -17,6 +17,7 @@ from routes.td3_config import training_status
 from routes.training_management import get_training_status_info, stop_training_task
 from routes.td3_data_reader import load_training_data_from_line_id
 from lib.line_service import line_service
+from routes.td3_optimize_handlers.utils import get_timezone
 
 # 模型文件名前缀
 MODEL_FILENAME_PREFIX = "M1"
@@ -112,7 +113,7 @@ def start_training():
         training_status['current_loss_rate'] = 0
         training_status['best_loss_rate'] = float('inf')
         training_status['message'] = '正在加载训练数据...'
-        training_status['start_time'] = datetime.now().isoformat()
+        training_status['start_time'] = datetime.now(get_timezone()).isoformat()
         training_status['end_time'] = None
         training_status['result'] = None
         training_status['error'] = None
@@ -137,7 +138,7 @@ def start_training():
             
             # 添加训练日志（对象格式）
             log_entry = {
-                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'timestamp': datetime.now(get_timezone()).strftime('%Y-%m-%d %H:%M:%S'),
                 'episode': episode,
                 'reward': round(reward, 2),
                 'loss_rate': round(loss_rate, 4),
@@ -186,7 +187,7 @@ def start_training():
                 os.makedirs(agent_dir, exist_ok=True)
 
                 # 生成带时间戳的模型文件名
-                timestamp = datetime.now().strftime('%m%d_%H%M%S')
+                timestamp = datetime.now(get_timezone()).strftime('%m%d_%H%M%S')
                 model_filename = f'{MODEL_FILENAME_PREFIX}_{timestamp}.pth'
                 model_save_path = os.path.join(agent_dir, model_filename)
                 
@@ -209,7 +210,7 @@ def start_training():
                 training_status['is_training'] = False
                 training_status['message'] = '训练完成'
                 training_status['result'] = result
-                training_status['end_time'] = datetime.now().isoformat()
+                training_status['end_time'] = datetime.now(get_timezone()).isoformat()
                 
             except FileNotFoundError as e:
                 training_status['is_training'] = False
@@ -258,3 +259,190 @@ def get_training_status():
 def stop_training():
     """停止训练"""
     return stop_training_task(training_status)
+
+
+def start_multisample_training():
+    """
+    开始TD3多样本模型训练 (新功能)
+    
+    请求体格式:
+    {
+        "line_id": "uuid-string",  // 线路ID（必填）
+        "parameters": {
+            "max_episodes_per_sample": 10, // 每个样本每epoch训练次数
+            "epochs": 50,                  // 总轮数
+            "max_steps": 3,
+            "SB": 10,
+            "pr": 1e-6
+        }
+    }
+    """
+    global training_status
+    
+    # 导入多样本训练服务和数据加载器
+    from lib.td3_train_service_multi import train_td3_model_multisample
+    from routes.td3_data_reader import load_all_training_samples_from_line_id
+    
+    try:
+        # 检查是否正在训练
+        if training_status['is_training']:
+            return jsonify({
+                'status': 'error',
+                'message': '已有训练任务正在进行中'
+            }), 400
+        
+        data = request.get_json()
+        
+        # 验证必需参数
+        if 'line_id' not in data:
+            return jsonify({'status': 'error', 'message': '缺少必需参数: line_id'}), 400
+        
+        line_id = data['line_id']
+        
+        # 获取线路信息
+        line_data = line_service.get_line(line_id)
+        if not line_data:
+            return jsonify({'status': 'error', 'message': f'线路不存在: {line_id}'}), 404
+        
+        line_name = line_data['name']
+        
+        # 获取训练参数
+        params = data.get('parameters', {})
+        max_episodes_per_sample = params.get('max_episodes_per_sample', 10)
+        epochs = params.get('epochs', 50)
+        max_steps = params.get('max_steps', 3)
+        sb = params.get('SB', 10.0)
+        pr = params.get('pr', 1e-6)
+        
+        # 初始化训练状态
+        training_status['is_training'] = True
+        training_status['line_id'] = line_id
+        training_status['line_name'] = line_name
+        training_status['model_name'] = "M1"
+        training_status['current_episode'] = 0
+        training_status['total_episodes'] = 0
+        training_status['current_reward'] = 0
+        training_status['current_loss_rate'] = None
+        training_status['message'] = '正在加载多样本训练数据...'
+        training_status['start_time'] = datetime.now(get_timezone()).isoformat()
+        training_status['end_time'] = None
+        training_status['result'] = None
+        training_status['error'] = None
+        training_status['training_history'] = {
+            'rewards': [],
+            'loss_rates': [],
+            'normalized_improvements': []
+        }
+        training_status['logs'] = []
+        
+        # 定义进度回调
+        def progress_callback(data):
+            total_episode = data['total_episode']
+            reward = data['reward']
+            loss_rate = data['loss_rate']
+            normalized_improvement = data['normalized_improvement']
+            
+            training_status['current_episode'] = total_episode
+            training_status['current_reward'] = reward
+            training_status['current_loss_rate'] = loss_rate
+            
+            # 格式化消息
+            msg = (f"Epoch {data['epoch']}/{data['total_epochs']}, "
+                   f"Sample {data['sample_idx']}/{data['total_samples']} ({data['sample_name']}), "
+                   f"Episode {data['episode_in_sample']}/{data['episodes_per_sample']}")
+            training_status['message'] = msg
+                
+             # 更新训练历史数据
+            training_status['training_history']['rewards'].append(reward)
+            training_status['training_history']['loss_rates'].append(loss_rate)
+            training_status['training_history']['normalized_improvements'].append(normalized_improvement)
+            
+            # 日志
+            log_entry = {
+                'timestamp': datetime.now(get_timezone()).strftime('%Y-%m-%d %H:%M:%S'),
+                'episode': total_episode,
+                'reward': round(reward, 2),
+                'loss_rate': round(loss_rate, 2),
+                'normalized_improvement': round(normalized_improvement, 2),
+                'epoch': data['epoch'],
+                'total_epochs': data['total_epochs'],
+                'sample_idx': data['sample_idx'],
+                'total_samples': data['total_samples'],
+                'sample_name': data['sample_name'],
+                'episodes_per_sample': data['episodes_per_sample'],
+                'episode_in_sample': data['episode_in_sample'],
+                'baseline_loss': round(data.get('baseline_loss', 0), 2),
+                'relative_improvement': round(data.get('relative_improvement', 0), 1)
+            }
+            
+            training_status['logs'].append(log_entry)
+            if len(training_status['logs']) > 1000:
+                training_status['logs'] = training_status['logs'][-1000:]
+                
+        # 后台线程
+        def train_in_background():
+            global training_status
+            try:
+                print(f"\n=== 开始多样本训练: {line_name} ===")
+                
+                # 1. 加载所有样本
+                all_data = load_all_training_samples_from_line_id(line_id, line_name)
+                samples = all_data['samples']
+                config = all_data['config']
+                
+                num_samples = len(samples)
+                total_episodes = epochs * num_samples * max_episodes_per_sample
+                training_status['total_episodes'] = total_episodes
+                
+                print(f"加载了 {num_samples} 个训练样本，总计划训练 {total_episodes} 个 episodes")
+                
+                # 2. 构建模型保存路径
+                line_dir = line_service._get_line_dir(line_id)
+                agent_dir = os.path.join(line_dir, 'agent')
+                os.makedirs(agent_dir, exist_ok=True)
+                
+                model_save_path = os.path.join(agent_dir, f"M1.npz")
+
+                # 3. 启动训练
+                result = train_td3_model_multisample(
+                    samples_data=samples,
+                    common_config=config,
+                    sb=sb,
+                    max_episodes_per_sample=max_episodes_per_sample,
+                    epochs=epochs,
+                    max_steps=max_steps,
+                    model_save_path=model_save_path,
+                    pr=pr,
+                    progress_callback=progress_callback
+                )
+                
+                training_status['is_training'] = False
+                training_status['message'] = '多样本训练完成'
+                training_status['result'] = result
+                training_status['end_time'] = datetime.now(get_timezone()).isoformat()
+                
+            except Exception as e:
+                training_status['is_training'] = False
+                training_status['message'] = f'训练失败: {str(e)}'
+                training_status['error'] = str(e)
+                print(traceback.format_exc())
+                
+        # 启动线程
+        train_thread = threading.Thread(target=train_in_background)
+        train_thread.daemon = True
+        train_thread.start()
+        
+        return jsonify({
+            'status': 'success',
+            'message': '多样本训练任务已启动',
+            'data': {
+                'line_id': line_id,
+                'model_name': "M1"
+            }
+        })
+        
+    except Exception as e:
+        training_status['is_training'] = False
+        print(traceback.format_exc())
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+

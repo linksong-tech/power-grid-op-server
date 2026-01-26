@@ -66,7 +66,7 @@ class LineService:
 
     def _extract_archive(self, archive_path: str, extract_dir: str) -> bool:
         """
-        解压压缩包，自动去掉外层目录
+        解压压缩包，并提取其中的 Excel 文件到目标目录
 
         Args:
             archive_path: 压缩包路径
@@ -74,12 +74,17 @@ class LineService:
 
         Returns:
             是否成功
+
+        Raises:
+            ValueError: 如果压缩包内没有 Excel 文件
         """
+        temp_extract_dir = os.path.join(extract_dir, '_temp_extract')
         try:
             os.makedirs(extract_dir, exist_ok=True)
             
             # 创建临时解压目录
-            temp_extract_dir = os.path.join(extract_dir, '_temp_extract')
+            if os.path.exists(temp_extract_dir):
+                shutil.rmtree(temp_extract_dir)
             os.makedirs(temp_extract_dir, exist_ok=True)
             
             # 解压到临时目录
@@ -93,37 +98,50 @@ class LineService:
                 shutil.rmtree(temp_extract_dir)
                 return False
             
-            # 检查解压后的内容
-            items = os.listdir(temp_extract_dir)
+            # 递归查找所有 Excel 文件，限制深度为3层
+            excel_files = []
+            max_depth = 3
             
-            # 如果只有一个目录，则认为是外层包装目录，需要去掉
-            if len(items) == 1:
-                single_item = os.path.join(temp_extract_dir, items[0])
-                if os.path.isdir(single_item):
-                    # 将内层目录的内容移动到目标目录
-                    for item in os.listdir(single_item):
-                        src = os.path.join(single_item, item)
-                        dst = os.path.join(extract_dir, item)
-                        shutil.move(src, dst)
+            for root, dirs, files in os.walk(temp_extract_dir):
+                # 计算当前深度
+                rel_path = os.path.relpath(root, temp_extract_dir)
+                if rel_path == '.':
+                    current_depth = 0
                 else:
-                    # 如果是单个文件，直接移动
-                    dst = os.path.join(extract_dir, items[0])
-                    shutil.move(single_item, dst)
-            else:
-                # 如果有多个文件/目录，直接移动所有内容
-                for item in items:
-                    src = os.path.join(temp_extract_dir, item)
-                    dst = os.path.join(extract_dir, item)
-                    shutil.move(src, dst)
+                    current_depth = len(rel_path.split(os.sep))
+                
+                # 如果超过深度限制，停止遍历子目录
+                if current_depth >= max_depth:
+                    dirs[:] = []
+                
+                for file in files:
+                    if file.endswith(('.xlsx', '.xls')) and not file.startswith('~$') and not file.startswith('.'):
+                        excel_files.append(os.path.join(root, file))
+            
+            if not excel_files:
+                raise ValueError("压缩包内未找到有效的Excel文件(.xlsx/.xls)")
+            
+            # 将所有 Excel 文件移动到目标目录
+            for src_path in excel_files:
+                filename = os.path.basename(src_path)
+                dst_path = os.path.join(extract_dir, filename)
+                # 移动文件 (如果目标存在则覆盖)
+                if os.path.exists(dst_path):
+                    os.remove(dst_path)
+                shutil.move(src_path, dst_path)
             
             # 清理临时目录
             shutil.rmtree(temp_extract_dir)
             
             return True
+        except ValueError:
+            # 重新抛出 ValueError 以便上层捕获并返回给前端
+            if os.path.exists(temp_extract_dir):
+                shutil.rmtree(temp_extract_dir)
+            raise
         except Exception as e:
             print(f"[ERROR] 解压文件失败: {e}")
             # 清理临时目录
-            temp_extract_dir = os.path.join(extract_dir, '_temp_extract')
             if os.path.exists(temp_extract_dir):
                 shutil.rmtree(temp_extract_dir)
             return False
@@ -329,7 +347,9 @@ class LineService:
                 self._write_line_json(line_id, line_data)
 
             return archive_filename
-
+        
+        except ValueError:
+            raise
         except Exception as e:
             print(f"[ERROR] 上传训练样本失败: {e}")
             return None
@@ -372,7 +392,9 @@ class LineService:
                 self._write_line_json(line_id, line_data)
 
             return archive_filename
-
+        
+        except ValueError:
+            raise
         except Exception as e:
             print(f"[ERROR] 上传测试样本失败: {e}")
             return None
@@ -488,8 +510,13 @@ class LineService:
 
             history_oc_data = []
             for _, row in bus_df.iterrows():
+                # 处理第一列可能为float的问题
+                col0 = row[0]
+                if isinstance(col0, float) and col0.is_integer():
+                    col0 = int(col0)
+
                 history_oc_data.append([
-                    str(row[0]),
+                    str(col0),
                     str(row[1]),
                     str(row[2])
                 ])
@@ -544,8 +571,13 @@ class LineService:
 
             history_oc_data = []
             for _, row in bus_df.iterrows():
+                # 处理第一列可能为float的问题
+                col0 = row[0]
+                if isinstance(col0, float) and col0.is_integer():
+                    col0 = int(col0)
+                
                 history_oc_data.append([
-                    str(row[0]),
+                    str(col0),
                     str(row[1]),
                     str(row[2])
                 ])

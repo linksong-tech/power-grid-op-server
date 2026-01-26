@@ -457,3 +457,116 @@ def load_test_samples(line_name: str, training_data_dir: str) -> List[Dict]:
         raise ValueError(f'路径不是目录: {line_dir}')
 
     return read_test_samples(line_dir, line_name)
+
+
+def load_all_training_samples_from_line_id(line_id: str, line_name: str) -> Dict:
+    """
+    从新的线路目录结构加载**所有**训练数据（用于多样本训练）
+    
+    Args:
+        line_id: 线路ID（UUID）
+        line_name: 线路名称
+    
+    Returns:
+        {
+            'samples': List[Dict],  # 每个样本包含 {bus_data, ub, filename}
+            'config': Dict          # 公共配置 {branch_data, voltage_limits, key_nodes, tunable_q_nodes}
+        }
+    """
+    # 导入 line_service
+    import sys
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'lib'))
+    from line_service import line_service
+    
+    # 获取线路信息
+    line_data = line_service.get_line(line_id)
+    if not line_data:
+        raise FileNotFoundError(f'线路不存在: {line_id}')
+    
+    # 检查必需的配置数据
+    if not line_data.get('lineParamsData'):
+        raise ValueError('线路缺少支路数据（lineParamsData）')
+    if not line_data.get('voltageLimitData'):
+        raise ValueError('线路缺少电压上下限数据（voltageLimitData）')
+    if not line_data.get('keyNodesData'):
+        raise ValueError('线路缺少关键节点数据（keyNodesData）')
+    if not line_data.get('adjustablePvData'):
+        raise ValueError('线路缺少可调光伏数据（adjustablePvData）')
+    
+    # 获取线路目录
+    line_data_dir = line_service._get_line_dir(line_id)
+    train_dir = os.path.join(line_data_dir, 'train')
+    
+    # 获取所有训练样本文件
+    if not os.path.exists(train_dir):
+        raise FileNotFoundError(f'训练样本目录不存在: {train_dir}')
+        
+    sample_files = glob.glob(os.path.join(train_dir, '*.xlsx'))
+    if not sample_files:
+        raise FileNotFoundError(f'未找到训练样本文件: {train_dir}/*.xlsx')
+        
+    # 读取所有样本
+    samples = []
+    for file_path in sample_files:
+        try:
+            bus_array = _read_bus_matrix(file_path)
+            df_slack = pd.read_excel(file_path, sheet_name="slack", header=None)
+            ub = _extract_first_float(df_slack)
+            
+            samples.append({
+                'bus_data': bus_array,
+                'ub': ub,
+                'filename': os.path.basename(file_path)
+            })
+        except Exception as e:
+            print(f"警告：读取样本 {file_path} 失败: {e}")
+            continue
+            
+    if not samples:
+        raise ValueError("没有可用的训练样本")
+    
+    # 读取配置数据（这部分与 load_training_data_from_line_id 相同）
+    branch_data = np.array(line_data['lineParamsData'], dtype=float)
+    
+    voltage_limit_data = line_data['voltageLimitData']
+    if not isinstance(voltage_limit_data, list) or len(voltage_limit_data) != 2:
+        raise ValueError('电压上下限数据格式错误')
+    voltage_lower = float(voltage_limit_data[0])
+    voltage_upper = float(voltage_limit_data[1])
+    
+    key_nodes_data = line_data['keyNodesData']
+    key_nodes = [int(node) - 1 for node in key_nodes_data]
+    
+    adjustable_pv_data = line_data['adjustablePvData']
+    tunable_q_nodes_config = []
+    
+    # 注意：这里需要一个参考的Bus数据来计算Q限制，我们可以用第一个样本的Bus数据
+    # 因为不同样本的P可能有变化，导致Q限值变化，但配置中的容量是不变的
+    # 在实际训练中，每个样本应该重新计算Q限值，这里只返回配置信息
+    
+    first_bus_data = samples[0]['bus_data']
+    
+    for pv in adjustable_pv_data:
+        node_num = int(pv[0])
+        capacity = float(pv[1])
+        node_name = str(pv[2]) if len(pv) > 2 else f"节点{node_num}"
+        
+        node_index = node_num - 1
+        
+        # 保存原始配置，具体limit在环境reset时根据当前样本的P计算
+        tunable_q_nodes_config.append({
+            'node_index': node_index,
+            'capacity': capacity,
+            'node_name': node_name
+        })
+
+    return {
+        'samples': samples,
+        'config': {
+            'branch_data': branch_data,
+            'voltage_limits': (voltage_lower, voltage_upper),
+            'key_nodes': key_nodes,
+            'tunable_q_nodes_config': tunable_q_nodes_config # 这里返回配置而不是计算好的值
+        }
+    }
+

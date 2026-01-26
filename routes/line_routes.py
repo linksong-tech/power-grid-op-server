@@ -201,6 +201,8 @@ def upload_training_sample(line_id):
             'data': {'filename': archive_filename}
         })
         
+    except ValueError as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'上传失败: {str(e)}'}), 500
 
@@ -238,6 +240,8 @@ def upload_test_sample(line_id):
             'data': {'filename': archive_filename}
         })
         
+    except ValueError as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'上传失败: {str(e)}'}), 500
 

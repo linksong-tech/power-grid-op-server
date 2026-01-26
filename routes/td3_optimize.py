@@ -17,7 +17,7 @@ from .td3_optimize_routes import (
     get_evaluation_report
 )
 from .td3_model_routes import get_td3_models, get_td3_results, get_td3_result_detail, get_td3_template
-from .td3_training_routes import start_training, get_training_status, stop_training
+from .td3_training_routes import start_training, get_training_status, stop_training, start_multisample_training
 from .td3_sample_routes import upload_training_samples, get_training_samples, get_sample_detail, get_test_samples, get_test_sample_detail_route
 from .td3_agent_routes import get_trained_agents, get_agent_detail, delete_agent
 from .td3_data_routes import upload_powerdata_archive, get_powerdata_lines, get_upload_task_status
@@ -32,6 +32,7 @@ td3_optimize_bp.add_url_rule('/api/td3-optimize/results', 'get_td3_results', get
 td3_optimize_bp.add_url_rule('/api/td3-optimize/results/<filename>', 'get_td3_result_detail', get_td3_result_detail, methods=['GET'])
 td3_optimize_bp.add_url_rule('/api/td3-optimize/template', 'get_td3_template', get_td3_template, methods=['GET'])
 td3_optimize_bp.add_url_rule('/api/td3-optimize/train', 'start_training', start_training, methods=['POST'])
+td3_optimize_bp.add_url_rule('/api/td3-optimize/train-multisample', 'start_multisample_training', start_multisample_training, methods=['POST'])
 td3_optimize_bp.add_url_rule('/api/td3-optimize/training-status', 'get_training_status', get_training_status, methods=['GET'])
 td3_optimize_bp.add_url_rule('/api/td3-optimize/stop-training', 'stop_training', stop_training, methods=['POST'])
 td3_optimize_bp.add_url_rule('/api/td3-optimize/upload-samples', 'upload_training_samples', upload_training_samples, methods=['POST'])
