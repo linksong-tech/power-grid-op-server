@@ -142,6 +142,12 @@ def update_line(line_id):
 
             data['voltageLevel'] = voltage_level
         
+        if 'configStatus' in data:
+            config_status = str(data.get('configStatus'))
+            if config_status not in ('1', '2'):
+                 return jsonify({'status': 'error', 'message': '工况配置状态错误，仅支持1(研究态)/2(实时态)'}), 400
+            data['configStatus'] = config_status
+        
         line_data = line_service.update_line(line_id, data)
         
         if not line_data:
