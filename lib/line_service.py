@@ -192,7 +192,7 @@ class LineService:
                 'voltageLimit', 'keyNodes', 'historyOcDate',
                 'busVoltage', 'trainingSamplePath', 'testSamplePath',
                 'lineParamsData', 'historyOcData', 'adjustablePvData',
-                'voltageLimitData', 'keyNodesData'
+                'voltageLimitData', 'keyNodesData', 'historyVoltageData'
             ]
             for field in optional_fields:
                 if field in data:
