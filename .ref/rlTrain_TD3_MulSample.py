@@ -1352,7 +1352,7 @@ def train_rl_model_with_normalized_improvement():
     # -------------------------- 3. 训练参数配置 --------------------------
     # 分层训练参数
     samples_per_epoch = 10  # 每个样本连续训练的episode数
-    epochs = 300  # 训练轮数（每个样本训练samples_per_epoch个episode）
+    epochs = 30  # 训练轮数（每个样本训练samples_per_epoch个episode）
     
     max_steps = 3
     rewards_history = []
@@ -1465,7 +1465,7 @@ def train_rl_model_with_normalized_improvement():
         # 保存最优模型（基于归一化改善程度）
         best_normalized_improvement = save_best_normalized_model(
             agent=agent,
-            filename="M1_normalized",
+            filename="M1",
             best_normalized_improvement=best_normalized_improvement,
             current_normalized_improvement=avg_normalized_improvement,
             paths=paths

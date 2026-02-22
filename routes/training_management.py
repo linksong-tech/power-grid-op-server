@@ -25,6 +25,9 @@ def get_training_status_info(training_status):
         if status_copy.get('best_loss_rate') == float('inf'):
             status_copy['best_loss_rate'] = None  # 前端会显示为 '-'
         
+        # 排除内部缓冲区字段，不暴露给前端
+        status_copy.pop('_epoch_buffer', None)
+        
         return jsonify({
             'status': 'success',
             'data': status_copy

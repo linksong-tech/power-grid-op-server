@@ -334,6 +334,17 @@ def start_multisample_training():
             'normalized_improvements': []
         }
         training_status['logs'] = []
+        # 按 Epoch 聚合的训练历史
+        training_status['epoch_history'] = {
+            'rewards': [],      # 每个 Epoch 的平均奖励
+            'loss_rates': [],   # 每个 Epoch 的平均网损率
+        }
+        # 内部缓冲区：收集当前 Epoch 内各 episode 的数据
+        training_status['_epoch_buffer'] = {
+            'rewards': [],
+            'loss_rates': [],
+            'current_epoch': 0
+        }
         
         # 定义进度回调
         def progress_callback(data):
@@ -352,10 +363,32 @@ def start_multisample_training():
                    f"Episode {data['episode_in_sample']}/{data['episodes_per_sample']}")
             training_status['message'] = msg
                 
-             # 更新训练历史数据
+            # 更新训练历史数据（每个 episode 的原始值）
             training_status['training_history']['rewards'].append(reward)
             training_status['training_history']['loss_rates'].append(loss_rate)
             training_status['training_history']['normalized_improvements'].append(normalized_improvement)
+            
+            # 按 Epoch 聚合数据
+            epoch_buf = training_status['_epoch_buffer']
+            current_epoch = data['epoch']
+            
+            # 检测 Epoch 切换：当新的 epoch 值大于缓冲区中的 current_epoch 时
+            if current_epoch > epoch_buf['current_epoch'] and epoch_buf['current_epoch'] > 0:
+                # 上一个 Epoch 结束，计算平均值并追加到 epoch_history
+                if epoch_buf['rewards']:
+                    import numpy as _np
+                    avg_reward = float(_np.mean(epoch_buf['rewards']))
+                    avg_loss_rate = float(_np.mean(epoch_buf['loss_rates']))
+                    training_status['epoch_history']['rewards'].append(round(avg_reward, 2))
+                    training_status['epoch_history']['loss_rates'].append(round(avg_loss_rate, 4))
+                # 清空缓冲区
+                epoch_buf['rewards'] = []
+                epoch_buf['loss_rates'] = []
+            
+            # 更新当前 Epoch 编号并追加当前 episode 数据到缓冲区
+            epoch_buf['current_epoch'] = current_epoch
+            epoch_buf['rewards'].append(reward)
+            epoch_buf['loss_rates'].append(loss_rate)
             
             # 日志
             log_entry = {
@@ -415,6 +448,17 @@ def start_multisample_training():
                     pr=pr,
                     progress_callback=progress_callback
                 )
+                
+                # 训练结束时，刷新最后一个 Epoch 的缓冲数据
+                epoch_buf = training_status['_epoch_buffer']
+                if epoch_buf['rewards']:
+                    import numpy as _np
+                    avg_reward = float(_np.mean(epoch_buf['rewards']))
+                    avg_loss_rate = float(_np.mean(epoch_buf['loss_rates']))
+                    training_status['epoch_history']['rewards'].append(round(avg_reward, 2))
+                    training_status['epoch_history']['loss_rates'].append(round(avg_loss_rate, 4))
+                    epoch_buf['rewards'] = []
+                    epoch_buf['loss_rates'] = []
                 
                 training_status['is_training'] = False
                 training_status['message'] = '多样本训练完成'
