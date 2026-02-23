@@ -68,3 +68,4 @@ data
 results
 /venv
 td3_training_data
+.ref
