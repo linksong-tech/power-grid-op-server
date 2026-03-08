@@ -5,6 +5,8 @@
 import os
 import tempfile
 import shutil
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from flask import Blueprint, jsonify, request
 from werkzeug.utils import secure_filename
 from lib.line_service import line_service
@@ -298,3 +300,92 @@ def get_test_sample_detail(line_id, filename):
         return jsonify({'status': 'success', 'data': detail})
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'获取测试样本详情失败: {str(e)}'}), 500
+
+
+@line_bp.route('/api/lines/<line_id>/history-oc', methods=['POST'])
+def upload_history_oc(line_id):
+    """上传多个历史工况Excel文件"""
+    try:
+        files = request.files.getlist('files')
+        
+        if not files:
+            return jsonify({'status': 'error', 'message': '未找到上传文件'}), 400
+        
+        # 验证文件格式
+        for file in files:
+            if not file.filename:
+                return jsonify({'status': 'error', 'message': '存在未命名文件'}), 400
+            filename = secure_filename(file.filename)
+            if not filename.endswith(('.xlsx', '.xls')):
+                return jsonify({'status': 'error', 'message': f'不支持的文件格式: {file.filename}，仅支持 .xlsx/.xls'}), 400
+        
+        # 使用临时目录保存文件，并在保存后交给 line_service 处理
+        temp_dir = tempfile.mkdtemp()
+        total_count = 0
+        
+        try:
+            # 定义单个文件保存函数
+            def save_single_file(file_obj, directory):
+                try:
+                    fname = secure_filename(file_obj.filename)
+                    t_path = os.path.join(directory, fname)
+                    file_obj.save(t_path)
+                    return t_path
+                except Exception as e:
+                    print(f"Error saving file {file_obj.filename}: {e}")
+                    return None
+
+            # 分批次处理文件，避免一次性产生过多 I/O 并发导致系统资源耗尽
+            BATCH_SIZE = 20
+            for i in range(0, len(files), BATCH_SIZE):
+                batch = files[i:i + BATCH_SIZE]
+                batch_file_paths = []
+                
+                # 在批次内使用线程池提高效率
+                with ThreadPoolExecutor(max_workers=10) as executor:
+                    batch_file_paths = list(filter(None, executor.map(lambda f: save_single_file(f, temp_dir), batch)))
+                
+                if batch_file_paths:
+                    # 每完成一个批次的保存，立即同步到正式存储目录
+                    count = line_service.upload_history_oc(line_id, batch_file_paths)
+                    if count:
+                        total_count += count
+            
+            if total_count == 0 and len(files) > 0:
+                return jsonify({'status': 'error', 'message': '所有文件保存失败'}), 500
+            
+            return jsonify({
+                'status': 'success',
+                'message': f'已成功分批次处理并存储 {total_count} / {len(files)} 个工况文件',
+                'data': {'count': total_count}
+            })
+        finally:
+            # 清理临时目录
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'上传失败: {str(e)}'}), 500
+
+
+@line_bp.route('/api/lines/<line_id>/history-oc-samples', methods=['GET'])
+def get_history_oc_samples(line_id):
+    """获取历史工况文件列表"""
+    try:
+        samples = line_service.get_history_oc_samples(line_id)
+        return jsonify({'status': 'success', 'data': samples})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'获取历史工况列表失败: {str(e)}'}), 500
+
+
+@line_bp.route('/api/lines/<line_id>/history-oc-samples/<filename>', methods=['GET'])
+def get_history_oc_detail(line_id, filename):
+    """获取历史工况详情"""
+    try:
+        detail = line_service.get_history_oc_detail(line_id, filename)
+        
+        if not detail:
+            return jsonify({'status': 'error', 'message': '历史工况不存在或读取失败'}), 404
+        
+        return jsonify({'status': 'success', 'data': detail})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'获取历史工况详情失败: {str(e)}'}), 500

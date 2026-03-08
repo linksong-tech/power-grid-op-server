@@ -9,6 +9,7 @@ import shutil
 import zipfile
 import tarfile
 import pandas as pd
+import threading
 from datetime import datetime
 from typing import Optional, Dict, List, Any
 
@@ -23,6 +24,7 @@ class LineService:
         Args:
             base_dir: 线路数据基础目录，默认为 data/line_data
         """
+        self._lock = threading.Lock()
         if base_dir is None:
             # 获取项目根目录
             current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -57,8 +59,9 @@ class LineService:
         json_path = self._get_line_json_path(line_id)
 
         try:
-            with open(json_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
+            with self._lock:
+                with open(json_path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
             return True
         except Exception as e:
             print(f"[ERROR] 写入线路JSON失败: {e}")
@@ -169,9 +172,10 @@ class LineService:
             # 创建线路目录
             os.makedirs(line_dir, exist_ok=True)
             
-            # 创建train和test子目录
+            # 创建train、test和history子目录
             os.makedirs(os.path.join(line_dir, 'train'), exist_ok=True)
             os.makedirs(os.path.join(line_dir, 'test'), exist_ok=True)
+            os.makedirs(os.path.join(line_dir, 'history'), exist_ok=True)
             
             # 准备线路数据
             now = datetime.now().isoformat()
@@ -191,6 +195,7 @@ class LineService:
                 'lineParams', 'historyOc', 'adjustablePv',
                 'voltageLimit', 'keyNodes', 'historyOcDate',
                 'busVoltage', 'trainingSamplePath', 'testSamplePath',
+                'historyOcPath',
                 'lineParamsData', 'historyOcData', 'adjustablePvData',
                 'voltageLimitData', 'keyNodesData', 'historyVoltageData'
             ]
@@ -591,6 +596,161 @@ class LineService:
 
         except Exception as e:
             print(f"[ERROR] 获取测试样本详情失败: {e}")
+            import traceback
+            print(traceback.format_exc())
+            return None
+    def upload_history_oc(self, line_id: str, file_paths: List[str]) -> Optional[int]:
+        """
+        上传多个历史工况Excel文件
+
+        Args:
+            line_id: 线路ID
+            file_paths: Excel文件路径列表
+
+        Returns:
+            成功上传的文件数量，失败返回None
+        """
+        try:
+            line_dir = self._get_line_dir(line_id)
+            if not os.path.exists(line_dir):
+                return None
+
+            history_dir = os.path.join(line_dir, 'history')
+            os.makedirs(history_dir, exist_ok=True)
+
+            count = 0
+            for src_path in file_paths:
+                filename = os.path.basename(src_path)
+                dst_path = os.path.join(history_dir, filename)
+                # 如果目标文件已存在则覆盖
+                if os.path.exists(dst_path):
+                    os.remove(dst_path)
+                shutil.move(src_path, dst_path)
+                count += 1
+
+            # 更新线路信息
+            line_data = self._read_line_json(line_id)
+            if line_data:
+                line_data['historyOcPath'] = 'history'
+                line_data['updatedAt'] = datetime.now().isoformat()
+                self._write_line_json(line_id, line_data)
+
+            return count
+
+        except Exception as e:
+            print(f"[ERROR] 上传历史工况失败: {e}")
+            return None
+
+    def get_history_oc_samples(self, line_id: str) -> List[Dict[str, Any]]:
+        """
+        获取历史工况文件列表
+
+        Args:
+            line_id: 线路ID
+
+        Returns:
+            历史工况文件列表
+        """
+        try:
+            line_dir = self._get_line_dir(line_id)
+            history_dir = os.path.join(line_dir, 'history')
+
+            if not os.path.exists(history_dir):
+                return []
+
+            samples = []
+            for filename in os.listdir(history_dir):
+                if filename.endswith(('.xlsx', '.xls')) and not filename.startswith('~$'):
+                    filepath = os.path.join(history_dir, filename)
+                    file_stat = os.stat(filepath)
+
+                    samples.append({
+                        'filename': filename,
+                        'name': os.path.splitext(filename)[0],
+                        'size': file_stat.st_size,
+                        'modifiedTime': file_stat.st_mtime
+                    })
+
+            samples.sort(key=lambda x: x.get('modifiedTime', 0), reverse=True)
+            return samples
+
+        except Exception as e:
+            print(f"[ERROR] 获取历史工况列表失败: {e}")
+            return []
+
+    def get_history_oc_detail(self, line_id: str, filename: str) -> Optional[Dict[str, Any]]:
+        """
+        获取历史工况详情
+
+        Args:
+            line_id: 线路ID
+            filename: Excel 文件名
+
+        Returns:
+            工况详情数据，失败返回None
+        """
+        try:
+            line_dir = self._get_line_dir(line_id)
+            history_dir = os.path.join(line_dir, 'history')
+            filepath = os.path.join(history_dir, filename)
+
+            if not os.path.exists(filepath):
+                return None
+
+            excel_file = pd.ExcelFile(filepath)
+
+            required_sheets = ['date', 'slack', 'bus']
+            missing_sheets = [sheet for sheet in required_sheets if sheet not in excel_file.sheet_names]
+            if missing_sheets:
+                print(f"[ERROR] Excel 文件缺少必需的 sheet: {', '.join(missing_sheets)}")
+                return None
+
+            date_df = pd.read_excel(filepath, sheet_name='date', header=None, skiprows=1)
+            history_oc_date = str(date_df.iloc[0, 0]) if not date_df.empty else ''
+
+            slack_df = pd.read_excel(filepath, sheet_name='slack', header=None, skiprows=1)
+            bus_voltage = str(slack_df.iloc[0, 0]) if not slack_df.empty else ''
+
+            bus_df = pd.read_excel(filepath, sheet_name='bus', header=None, skiprows=1)
+
+            history_oc_data = []
+            for _, row in bus_df.iterrows():
+                # 处理第一列可能为float的问题
+                col0 = row[0]
+                if isinstance(col0, float) and col0.is_integer():
+                    col0 = int(col0)
+
+                history_oc_data.append([
+                    str(col0),
+                    str(row[1]),
+                    str(row[2])
+                ])
+
+            # 读取 voltage sheet（历史电压数据），兼容旧模板
+            history_voltage_data = []
+            if 'voltage' in excel_file.sheet_names:
+                voltage_df = pd.read_excel(filepath, sheet_name='voltage', header=None, skiprows=1)
+                for _, vrow in voltage_df.iterrows():
+                    vcol0 = vrow[0]
+                    if isinstance(vcol0, float) and vcol0.is_integer():
+                        vcol0 = int(vcol0)
+                    node_no = str(vcol0)
+                    if node_no.strip():
+                        history_voltage_data.append([
+                            node_no,
+                            str(vrow[1])
+                        ])
+
+            return {
+                'filename': filename,
+                'historyOcDate': history_oc_date,
+                'busVoltage': bus_voltage,
+                'historyOcData': history_oc_data,
+                'historyVoltageData': history_voltage_data
+            }
+
+        except Exception as e:
+            print(f"[ERROR] 获取历史工况详情失败: {e}")
             import traceback
             print(traceback.format_exc())
             return None
